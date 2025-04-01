@@ -11,6 +11,8 @@ import json
 import socket
 import traceback
 import gc
+import psutil
+import os
 
 app = Flask(__name__)
 
@@ -20,6 +22,14 @@ latest_letter = None
 camera = None
 raw_capture = None
 error_message = None
+frame_counter = 0  # Added frame counter for garbage collection
+
+# Set process priority
+try:
+    p = psutil.Process(os.getpid())
+    p.nice(-10)  # Set high priority
+except:
+    pass
 
 def get_ip_address():
     """Get the local IP address of the Raspberry Pi"""
@@ -40,10 +50,10 @@ def get_finger_state(hand_landmarks):
         finger_tips = [8, 12, 16, 20]
         finger_bases = [5, 9, 13, 17]
         
-        # Simplified orientation check
-        wrist = hand_landmarks.landmark[0]
-        middle_base = hand_landmarks.landmark[9]
-        is_vertical = abs(middle_base.y - wrist.y) > abs(middle_base.x - wrist.x)
+        # Simplified orientation check using numpy 1.17.3 compatible operations
+        wrist = np.array([hand_landmarks.landmark[0].x, hand_landmarks.landmark[0].y])
+        middle_base = np.array([hand_landmarks.landmark[9].x, hand_landmarks.landmark[9].y])
+        is_vertical = abs(middle_base[1] - wrist[1]) > abs(middle_base[0] - wrist[0])
         
         # Check thumb with simplified logic
         thumb_tip = hand_landmarks.landmark[4]
@@ -55,7 +65,7 @@ def get_finger_state(hand_landmarks):
         for tip, base in zip(finger_tips, finger_bases):
             tip_point = hand_landmarks.landmark[tip]
             base_point = hand_landmarks.landmark[base]
-            is_extended = (tip_point.y < base_point.y) if is_vertical else (tip_point.x > base_point.x)
+            is_extended = (tip_point.y < base_point.y) if is_vertical else (tip_point.x > thumb_base.x)
             fingers_extended.append(is_extended)
         
         return thumb_extended, fingers_extended
@@ -96,35 +106,36 @@ def detect_letter(hand_landmarks):
 
 def process_frames():
     """Background thread for processing camera frames"""
-    global latest_letter, camera, raw_capture, error_message
+    global latest_letter, camera, raw_capture, error_message, frame_counter
     
-    # Initialize MediaPipe with optimized settings
+    # Initialize MediaPipe with optimized settings for 0.8.8
     mp_hands = mp.solutions.hands
     hands = mp_hands.Hands(
         static_image_mode=False,
         max_num_hands=1,
         min_detection_confidence=0.5,
-        min_tracking_confidence=0.3,
-        model_complexity=0  # Use lighter model
+        min_tracking_confidence=0.3
     )
-    mp_draw = mp.solutions.drawing_utils
 
     while True:  # Main loop to handle camera reconnection
         try:
             # Initialize camera with lower resolution
             if camera is None:
                 camera = PiCamera()
-                camera.resolution = (320, 240)  # Restored original resolution
-                camera.framerate = 20  # Increased framerate for better viewing
+                camera.resolution = (320, 240)  # Lower resolution for better performance
+                camera.framerate = 15  # Reduced framerate
+                camera.exposure_mode = 'night'  # Better for indoor use
+                camera.awb_mode = 'auto'
                 raw_capture = PiRGBArray(camera, size=(320, 240))
                 time.sleep(1)  # Camera warm-up
                 print("Camera initialized successfully")
 
             for frame in camera.capture_continuous(raw_capture, format="bgr", use_video_port=True):
                 try:
+                    frame_counter += 1
                     image = frame.array
                     
-                    # Process hands directly without preprocessing
+                    # Process hands with numpy 1.17.3 compatible operations
                     rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                     results = hands.process(rgb_image)
                     detected_letter = None
@@ -133,11 +144,15 @@ def process_frames():
                         for hand_landmarks in results.multi_hand_landmarks:
                             detected_letter = detect_letter(hand_landmarks)
                             if detected_letter:
-                                mp_draw.draw_landmarks(
-                                    image,
-                                    hand_landmarks,
-                                    mp_hands.HAND_CONNECTIONS
-                                )
+                                # Draw landmarks using OpenCV 3.4.3.18 compatible method
+                                for connection in mp_hands.HAND_CONNECTIONS:
+                                    start_idx = connection[0]
+                                    end_idx = connection[1]
+                                    start_point = (int(hand_landmarks.landmark[start_idx].x * image.shape[1]),
+                                                int(hand_landmarks.landmark[start_idx].y * image.shape[0]))
+                                    end_point = (int(hand_landmarks.landmark[end_idx].x * image.shape[1]),
+                                               int(hand_landmarks.landmark[end_idx].y * image.shape[0]))
+                                    cv2.line(image, start_point, end_point, (0, 255, 0), 2)
                     
                     # Update latest letter
                     latest_letter = detected_letter
@@ -161,14 +176,16 @@ def process_frames():
                     
                     # Clear the stream
                     raw_capture.truncate(0)
+                    raw_capture.seek(0)  # Added for compatibility
                     
                     # Force garbage collection less frequently
-                    if frame_counter % 60 == 0:  # Reduced frequency
+                    if frame_counter % 30 == 0:  # Reduced frequency
                         gc.collect()
                     
                 except Exception as e:
                     print(f"Error processing frame: {str(e)}")
                     raw_capture.truncate(0)
+                    raw_capture.seek(0)  # Added for compatibility
                     continue
                 
         except Exception as e:
@@ -191,12 +208,14 @@ def generate_frames():
         try:
             if not frame_queue.empty():
                 frame = frame_queue.get()
-                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])  # Increased quality
+                # Use OpenCV 3.4.3.18 compatible encoding with numpy 1.17.3
+                frame = frame.astype(np.uint8)  # Ensure correct data type
+                _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                 frame_bytes = buffer.tobytes()
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
             else:
-                time.sleep(0.01)  # Reduced sleep time for smoother streaming
+                time.sleep(0.02)  # Increased sleep time to reduce CPU usage
         except Exception as e:
             print(f"Error generating frames: {str(e)}")
             time.sleep(0.2)
@@ -249,7 +268,5 @@ if __name__ == '__main__':
         try:
             if camera:
                 camera.close()
-            if hands:
-                hands.close()
         except:
             pass 

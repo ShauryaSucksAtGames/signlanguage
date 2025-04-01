@@ -4,258 +4,163 @@ import numpy as np
 from picamera import PiCamera
 from picamera.array import PiRGBArray
 import time
-import argparse
 import gc
 import psutil
 import os
 
-# Add command line arguments
-parser = argparse.ArgumentParser()
-parser.add_argument('--headless', action='store_true', help='Run in headless mode without display')
-parser.add_argument('--memory-limit', type=int, default=80, help='Memory usage limit percentage')
-args = parser.parse_args()
-
-def check_memory_usage():
-    """Check if memory usage is above limit"""
-    memory_percent = psutil.Process(os.getpid()).memory_percent()
-    if memory_percent > args.memory_limit:
-        print(f"\nWarning: High memory usage ({memory_percent:.1f}%)")
-        gc.collect()  # Force garbage collection
-        return True
-    return False
-
-# Initialize MediaPipe Hands with optimized settings
-mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(
-    static_image_mode=False,
-    max_num_hands=1,
-    min_detection_confidence=0.5,  # Lowered for better performance
-    min_tracking_confidence=0.3,   # Lowered for better performance
-    model_complexity=0  # Use lighter model
-)
-mp_draw = mp.solutions.drawing_utils
-
+# Set process priority
 try:
-    # Initialize the camera with lower resolution
+    p = psutil.Process(os.getpid())
+    p.nice(-10)  # Set high priority
+except:
+    pass
+
+def get_finger_state(hand_landmarks):
+    """Determine if each finger is extended or not - optimized version"""
+    try:
+        finger_tips = [8, 12, 16, 20]
+        finger_bases = [5, 9, 13, 17]
+        
+        # Simplified orientation check using numpy 1.17.3 compatible operations
+        wrist = np.array([hand_landmarks.landmark[0].x, hand_landmarks.landmark[0].y])
+        middle_base = np.array([hand_landmarks.landmark[9].x, hand_landmarks.landmark[9].y])
+        is_vertical = abs(middle_base[1] - wrist[1]) > abs(middle_base[0] - wrist[0])
+        
+        # Check thumb with simplified logic
+        thumb_tip = hand_landmarks.landmark[4]
+        thumb_base = hand_landmarks.landmark[2]
+        thumb_extended = (thumb_tip.y < thumb_base.y) if is_vertical else (thumb_tip.x > thumb_base.x)
+        
+        # Check other fingers with simplified logic
+        fingers_extended = []
+        for tip, base in zip(finger_tips, finger_bases):
+            tip_point = hand_landmarks.landmark[tip]
+            base_point = hand_landmarks.landmark[base]
+            is_extended = (tip_point.y < base_point.y) if is_vertical else (tip_point.x > thumb_base.x)
+            fingers_extended.append(is_extended)
+        
+        return thumb_extended, fingers_extended
+    except Exception as e:
+        print(f"Error in get_finger_state: {str(e)}")
+        return False, [False, False, False, False]
+
+def detect_letter(hand_landmarks):
+    """Simplified letter detection logic"""
+    try:
+        if not hand_landmarks:
+            return None
+
+        thumb_extended, fingers_extended = get_finger_state(hand_landmarks)
+        index, middle, ring, pinky = fingers_extended
+        
+        # Simplified letter detection
+        # A: Thumb up, other fingers down
+        if thumb_extended and not any(fingers_extended):
+            return 'A'
+
+        # B: All fingers up
+        if thumb_extended and all(fingers_extended):
+            return 'B'
+
+        # C: All fingers up
+        if thumb_extended and all(fingers_extended):
+            return 'C'
+
+        # D: Index finger up
+        if thumb_extended and index and not middle and not ring and not pinky:
+            return 'D'
+
+        return None
+    except Exception as e:
+        print(f"Error in detect_letter: {str(e)}")
+        return None
+
+def main():
+    # Initialize camera
     camera = PiCamera()
-    camera.resolution = (320, 240)  # Reduced resolution
-    camera.framerate = 15          # Reduced framerate
+    camera.resolution = (320, 240)  # Lower resolution for better performance
+    camera.framerate = 15  # Reduced framerate
+    camera.exposure_mode = 'night'  # Better for indoor use
+    camera.awb_mode = 'auto'
     raw_capture = PiRGBArray(camera, size=(320, 240))
-
-    # Allow the camera to warm up
-    time.sleep(1)
-
-    print("Starting sign language detection...")
-    print("Press Ctrl+C to exit")
     
-    # Frame counter for skipping frames
+    # Initialize MediaPipe with optimized settings for 0.8.8
+    mp_hands = mp.solutions.hands
+    hands = mp_hands.Hands(
+        static_image_mode=False,
+        max_num_hands=1,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.3
+    )
+    
+    # Create window with OpenCV 3.4.3.18 compatible flags
+    cv2.namedWindow('Sign Language Detector', cv2.WINDOW_NORMAL)
+    cv2.resizeWindow('Sign Language Detector', 640, 480)
+    
     frame_counter = 0
-    last_gc_time = time.time()
-
-    for frame in camera.capture_continuous(raw_capture, format="bgr", use_video_port=True):
-        current_time = time.time()
-        
-        # Periodic memory check and cleanup (every 30 seconds)
-        if current_time - last_gc_time > 30:
-            if check_memory_usage():
-                last_gc_time = current_time
-
-        # Skip every other frame for better performance
-        frame_counter += 1
-        if frame_counter % 2 != 0:
-            raw_capture.truncate(0)
-            continue
-
-        # Get the frame
-        image = frame.array
-        
-        # Convert the BGR image to RGB (smaller image = faster conversion)
-        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        
-        try:
-            # Process the image and detect hands
-            results = hands.process(rgb_image)
+    print("Starting sign language detection...")
+    print("Press 'q' to quit")
+    
+    try:
+        for frame in camera.capture_continuous(raw_capture, format="bgr", use_video_port=True):
+            frame_counter += 1
+            image = frame.array
             
-            # Draw hand landmarks and detect letter
+            # Process hands with numpy 1.17.3 compatible operations
+            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            results = hands.process(rgb_image)
             detected_letter = None
+            
             if results.multi_hand_landmarks:
                 for hand_landmarks in results.multi_hand_landmarks:
                     detected_letter = detect_letter(hand_landmarks)
                     if detected_letter:
-                        if not args.headless:
-                            mp_draw.draw_landmarks(
-                                image, 
-                                hand_landmarks,
-                                mp_hands.HAND_CONNECTIONS
-                            )
+                        # Draw landmarks using OpenCV 3.4.3.18 compatible method
+                        for connection in mp_hands.HAND_CONNECTIONS:
+                            start_idx = connection[0]
+                            end_idx = connection[1]
+                            start_point = (int(hand_landmarks.landmark[start_idx].x * image.shape[1]),
+                                        int(hand_landmarks.landmark[start_idx].y * image.shape[0]))
+                            end_point = (int(hand_landmarks.landmark[end_idx].x * image.shape[1]),
+                                       int(hand_landmarks.landmark[end_idx].y * image.shape[0]))
+                            cv2.line(image, start_point, end_point, (0, 255, 0), 2)
             
-            # Display the detected letter
+            # Add letter to frame if detected
             if detected_letter:
-                print(f"Detected Letter: {detected_letter}", end='\r')
-                if not args.headless:
-                    cv2.putText(
-                        image,
-                        f"Letter: {detected_letter}",
-                        (250, 30),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.8,
-                        (0, 255, 0),
-                        2
-                    )
+                cv2.putText(
+                    image,
+                    f"Letter: {detected_letter}",
+                    (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.8,
+                    (0, 255, 0),
+                    2
+                )
             
-            # Display the frame if not in headless mode
-            if not args.headless:
-                cv2.imshow("Sign Language Detector", image)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
-
-        except Exception as e:
-            print(f"\nError processing frame: {str(e)}")
-            continue
-        
-        finally:
-            # Clear the stream in preparation for the next frame
+            # Display the frame
+            cv2.imshow('Sign Language Detector', image)
+            
+            # Clear the stream
             raw_capture.truncate(0)
-            # Clear unused variables
-            del rgb_image
-            if 'results' in locals():
-                del results
-
-except KeyboardInterrupt:
-    print("\nStopping sign language detection...")
-
-except Exception as e:
-    print(f"\nFatal error: {str(e)}")
-
-finally:
-    # Clean up
-    try:
+            raw_capture.seek(0)  # Added for compatibility
+            
+            # Force garbage collection less frequently
+            if frame_counter % 30 == 0:
+                gc.collect()
+            
+            # Check for quit command with OpenCV 3.4.3.18 compatible key check
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                break
+                
+    except Exception as e:
+        print(f"Error: {str(e)}")
+    finally:
+        # Clean up
         camera.close()
-    except:
-        pass
-    
-    if not args.headless:
         cv2.destroyAllWindows()
-    
-    try:
-        hands.close()
-    except:
-        pass
-    
-    # Final garbage collection
-    gc.collect()
-    print("Cleanup complete")
+        # Ensure proper cleanup for OpenCV 3.4.3.18
+        cv2.waitKey(1)
 
-def get_finger_state(hand_landmarks):
-    """Determine if each finger is extended or not - optimized version"""
-    # Use only essential landmarks
-    finger_tips = [8, 12, 16, 20]  # Index, Middle, Ring, Pinky tips
-    finger_bases = [5, 9, 13, 17]  # Index, Middle, Ring, Pinky bases
-    
-    # Check thumb (simplified)
-    thumb_extended = hand_landmarks.landmark[4].x > hand_landmarks.landmark[2].x
-    
-    # Check other fingers (simplified)
-    fingers_extended = []
-    for tip, base in zip(finger_tips, finger_bases):
-        fingers_extended.append(hand_landmarks.landmark[tip].y < hand_landmarks.landmark[base].y)
-    
-    return thumb_extended, fingers_extended
-
-def detect_letter(hand_landmarks):
-    if not hand_landmarks:
-        return None
-
-    thumb_extended, fingers_extended = get_finger_state(hand_landmarks)
-    index, middle, ring, pinky = fingers_extended
-
-    # Simplified detection logic with fewer checks
-    # A: Thumb up, other fingers down
-    if thumb_extended and not any(fingers_extended):
-        return 'A'
-
-    # B: All fingers up
-    if thumb_extended and all(fingers_extended):
-        return 'B'
-
-    # C: Curved hand (simplified check)
-    if thumb_extended and all(fingers_extended):
-        if hand_landmarks.landmark[8].y > hand_landmarks.landmark[5].y * 0.8:
-            return 'C'
-
-    # D: Index finger up
-    if thumb_extended and index and not middle and not ring and not pinky:
-        return 'D'
-
-    # E: All fingers down
-    if not thumb_extended and not any(fingers_extended):
-        return 'E'
-
-    # F: All fingers up and spread (simplified check)
-    if thumb_extended and all(fingers_extended):
-        if (hand_landmarks.landmark[8].x - hand_landmarks.landmark[20].x) > 0.15:
-            return 'F'
-
-    # G: Index finger pointing
-    if thumb_extended and index and not middle and not ring and not pinky:
-        return 'G'
-
-    # H: Index and middle fingers up
-    if thumb_extended and index and middle and not ring and not pinky:
-        return 'H'
-
-    # I: Pinky up
-    if thumb_extended and not index and not middle and not ring and pinky:
-        return 'I'
-
-    # K: Index and middle fingers spread
-    if thumb_extended and index and middle and not ring and not pinky:
-        if (hand_landmarks.landmark[12].x - hand_landmarks.landmark[8].x) > 0.08:
-            return 'K'
-
-    # L: Index and thumb up
-    if thumb_extended and index and not middle and not ring and not pinky:
-        return 'L'
-
-    # O: All fingers curved (simplified check)
-    if thumb_extended and all(fingers_extended):
-        if hand_landmarks.landmark[8].y > hand_landmarks.landmark[5].y * 0.8:
-            return 'O'
-
-    # R: Index and middle fingers crossed
-    if thumb_extended and index and middle and not ring and not pinky:
-        if hand_landmarks.landmark[12].x < hand_landmarks.landmark[8].x:
-            return 'R'
-
-    # S: Fist
-    if not thumb_extended and not any(fingers_extended):
-        return 'S'
-
-    # T: Thumb between index and middle
-    if thumb_extended and index and middle and not ring and not pinky:
-        return 'T'
-
-    # U: Index and middle fingers up together
-    if thumb_extended and index and middle and not ring and not pinky:
-        if (hand_landmarks.landmark[12].x - hand_landmarks.landmark[8].x) < 0.08:
-            return 'U'
-
-    # V: Index and middle fingers spread
-    if thumb_extended and index and middle and not ring and not pinky:
-        if (hand_landmarks.landmark[12].x - hand_landmarks.landmark[8].x) > 0.08:
-            return 'V'
-
-    # W: Three fingers up
-    if thumb_extended and index and middle and ring and not pinky:
-        return 'W'
-
-    # X: Index finger bent
-    if thumb_extended and index and not middle and not ring and not pinky:
-        if hand_landmarks.landmark[8].y > hand_landmarks.landmark[5].y * 0.8:
-            return 'X'
-
-    # Y: Thumb and pinky out
-    if thumb_extended and not index and not middle and not ring and pinky:
-        return 'Y'
-
-    return None 
+if __name__ == '__main__':
+    main() 
