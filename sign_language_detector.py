@@ -18,7 +18,7 @@ except:
     pass
 
 # Helper function to draw text with background
-def draw_text_with_background(image, text, position, font_scale=0.7, color=(0, 0, 255), thickness=2):
+def draw_text_with_background(image, text, position, font_scale=0.56, color=(0, 0, 255), thickness=1):
     font = cv2.FONT_HERSHEY_SIMPLEX
     text_size = cv2.getTextSize(text, font, font_scale, thickness)[0]
     
@@ -54,74 +54,33 @@ def get_finger_state(hand_landmarks, image=None, debug=False):
         middle_base = hand_landmarks.landmark[9]
         is_vertical = abs(middle_base.y - wrist.y) > abs(middle_base.x - wrist.x)
         
-        # Improved thumb detection
+        # Check thumb (different logic based on hand orientation)
         thumb_tip = hand_landmarks.landmark[4]
-        thumb_ip = hand_landmarks.landmark[3]  # Inner thumb joint
-        thumb_mcp = hand_landmarks.landmark[2]  # Base of thumb
-        thumb_cmc = hand_landmarks.landmark[1]  # Thumb CMC joint
-        
-        # Calculate directional vector from base to tip for thumb
-        thumb_vec_x = thumb_tip.x - thumb_mcp.x
-        thumb_vec_y = thumb_tip.y - thumb_mcp.y
+        thumb_ip = hand_landmarks.landmark[3]
+        thumb_cmc = hand_landmarks.landmark[1]
         
         # Determine if vertical or horizontal orientation
         if is_vertical:
-            # For vertical hand, more complex thumb detection
-            if wrist.x < middle_base.x:  # Left hand
-                thumb_extended = (thumb_tip.x < thumb_mcp.x)
-            else:  # Right hand
-                thumb_extended = (thumb_tip.x > thumb_mcp.x)
+            # For vertical hand, check if thumb tip is to the left or right of its base
+            thumb_extended = (thumb_tip.x < thumb_ip.x) if wrist.x < middle_base.x else (thumb_tip.x > thumb_ip.x)
         else:
-            # For horizontal hand, check if thumb is pointing in the opposite direction than fingers
-            if wrist.x < middle_base.x:  # Hand pointing right
-                thumb_extended = (thumb_tip.y < thumb_mcp.y)
-            else:  # Hand pointing left
-                thumb_extended = (thumb_tip.y < thumb_mcp.y)
+            # For horizontal hand, check if thumb is above or below its base
+            thumb_extended = (thumb_tip.y < thumb_ip.y)
         
-        # Special case adjustments for common problems
-        index_dip = hand_landmarks.landmark[7]  # Index finger DIP joint
-        pinky_tip = hand_landmarks.landmark[20]  # Pinky tip
-        
-        # Check if thumb is across palm (important for several signs)
-        distance_thumb_to_pinky = np.sqrt((thumb_tip.x - pinky_tip.x)**2 + (thumb_tip.y - pinky_tip.y)**2)
-        is_thumb_across_palm = distance_thumb_to_pinky < 0.25  # Threshold for thumb across palm
-        
-        # Check other fingers (improved)
+        # Check other fingers
         fingers_extended = []
         for i, (tip, base) in enumerate(zip(finger_tips, finger_bases)):
             tip_point = hand_landmarks.landmark[tip]
             base_point = hand_landmarks.landmark[base]
             
-            # Get middle joint for this finger (for bend detection)
-            mid_joint_idx = tip - 2  # PIP joint for each finger
-            mid_joint = hand_landmarks.landmark[mid_joint_idx]
-            
-            # Calculate bend angle
-            vec1 = np.array([base_point.x - mid_joint.x, base_point.y - mid_joint.y])
-            vec2 = np.array([tip_point.x - mid_joint.x, tip_point.y - mid_joint.y])
-            
-            # Normalize vectors
-            if np.linalg.norm(vec1) > 0 and np.linalg.norm(vec2) > 0:
-                vec1 = vec1 / np.linalg.norm(vec1)
-                vec2 = vec2 / np.linalg.norm(vec2)
-                
-                # Dot product for angle
-                dot_product = min(1.0, max(-1.0, np.dot(vec1, vec2)))
-                angle = np.arccos(dot_product) * 180 / np.pi
-            else:
-                angle = 0
-                
             # Different logic based on hand orientation
             if is_vertical:
-                # For vertical hand, check both position and angle
-                position_check = (tip_point.y < base_point.y - 0.02)  # Added threshold
-                is_extended = position_check and angle < 45  # Must be relatively straight
+                is_extended = (tip_point.y < base_point.y)  # Finger is up
             else:
                 if wrist.x < middle_base.x:  # Hand pointing right
-                    position_check = (tip_point.x > base_point.x + 0.02)
+                    is_extended = (tip_point.x > base_point.x)
                 else:  # Hand pointing left
-                    position_check = (tip_point.x < base_point.x - 0.02)
-                is_extended = position_check and angle < 45
+                    is_extended = (tip_point.x < base_point.x)
                     
             fingers_extended.append(is_extended)
             
@@ -130,18 +89,16 @@ def get_finger_state(hand_landmarks, image=None, debug=False):
                 img_h, img_w = image.shape[:2]
                 tip_px = int(tip_point.x * img_w), int(tip_point.y * img_h)
                 base_px = int(base_point.x * img_w), int(base_point.y * img_h)
-                mid_px = int(mid_joint.x * img_w), int(mid_joint.y * img_h)
                 
-                # Highlight finger tip, base and mid joint
+                # Highlight finger tip and base
                 cv2.circle(image, tip_px, 5, (0, 255, 255) if is_extended else (0, 0, 255), -1)
                 cv2.circle(image, base_px, 5, (255, 0, 0), -1)
-                cv2.circle(image, mid_px, 5, (0, 165, 255), -1)  # Orange for mid joint
                 
                 # Draw status text
                 status = "UP" if is_extended else "DOWN"
                 draw_text_with_background(
                     image, 
-                    f"{finger_names[i]}: {status} ({angle:.0f}°)", 
+                    f"{finger_names[i]}: {status}", 
                     (10, 70 + i * 30), 
                     color=(0, 255, 0) if is_extended else (0, 0, 255)
                 )
@@ -150,15 +107,15 @@ def get_finger_state(hand_landmarks, image=None, debug=False):
         if debug and image is not None:
             img_h, img_w = image.shape[:2]
             thumb_tip_px = int(thumb_tip.x * img_w), int(thumb_tip.y * img_h)
-            thumb_base_px = int(thumb_mcp.x * img_w), int(thumb_mcp.y * img_h)
+            thumb_ip_px = int(thumb_ip.x * img_w), int(thumb_ip.y * img_h)
             
             cv2.circle(image, thumb_tip_px, 5, (0, 255, 255) if thumb_extended else (0, 0, 255), -1)
-            cv2.circle(image, thumb_base_px, 5, (255, 0, 0), -1)
+            cv2.circle(image, thumb_ip_px, 5, (255, 0, 0), -1)
             
             status = "OUT" if thumb_extended else "IN"
             draw_text_with_background(
                 image, 
-                f"Thumb: {status} {'ACROSS' if is_thumb_across_palm else ''}", 
+                f"Thumb: {status}", 
                 (10, 40), 
                 color=(0, 255, 0) if thumb_extended else (0, 0, 255)
             )
@@ -172,10 +129,10 @@ def get_finger_state(hand_landmarks, image=None, debug=False):
                 color=(255, 0, 0)
             )
         
-        return thumb_extended, fingers_extended, is_thumb_across_palm
+        return thumb_extended, fingers_extended
     except Exception as e:
         print(f"Error in get_finger_state: {str(e)}")
-        return False, [False, False, False, False], False
+        return False, [False, False, False, False]
 
 def detect_letter(hand_landmarks, image=None, debug=False):
     """Detect ASL letters based on simplified finger positions"""
@@ -183,7 +140,7 @@ def detect_letter(hand_landmarks, image=None, debug=False):
         if not hand_landmarks:
             return None
 
-        thumb_extended, fingers_extended, thumb_across_palm = get_finger_state(hand_landmarks, image, debug)
+        thumb_extended, fingers_extended = get_finger_state(hand_landmarks, image, debug)
         index, middle, ring, pinky = fingers_extended
         
         # Get hand orientation
@@ -198,143 +155,190 @@ def detect_letter(hand_landmarks, image=None, debug=False):
         ring_tip = hand_landmarks.landmark[16]
         pinky_tip = hand_landmarks.landmark[20]
         
-        # Calculate distances between fingertips and joints
+        # Calculate distances between fingertips
         thumb_index_distance = np.sqrt((thumb_tip.x - index_tip.x)**2 + (thumb_tip.y - index_tip.y)**2)
         index_middle_distance = np.sqrt((index_tip.x - middle_tip.x)**2 + (index_tip.y - middle_tip.y)**2)
-        thumb_pinky_distance = np.sqrt((thumb_tip.x - pinky_tip.x)**2 + (thumb_tip.y - pinky_tip.y)**2)
+        middle_ring_distance = np.sqrt((middle_tip.x - ring_tip.x)**2 + (middle_tip.y - ring_tip.y)**2)
+        ring_pinky_distance = np.sqrt((ring_tip.x - pinky_tip.x)**2 + (ring_tip.y - pinky_tip.y)**2)
         
         # Get joint positions
         index_pip = hand_landmarks.landmark[6]
-        index_dip = hand_landmarks.landmark[7]
         middle_pip = hand_landmarks.landmark[10]
+        ring_pip = hand_landmarks.landmark[14]
+        pinky_pip = hand_landmarks.landmark[18]
         
-        # Calculate fingertip-to-palm distances (for 3D depth estimation)
+        # Calculate fingertip-to-pip distances for bend detection
+        index_bend = np.sqrt((index_tip.x - index_pip.x)**2 + (index_tip.y - index_pip.y)**2)
+        middle_bend = np.sqrt((middle_tip.x - middle_pip.x)**2 + (middle_tip.y - middle_pip.y)**2)
+        
+        # Get bases
         index_base = hand_landmarks.landmark[5]
-        thumb_base = hand_landmarks.landmark[2]
+        pinky_base = hand_landmarks.landmark[17]
         
-        # A - Fist with thumb out to side
-        if thumb_extended and not any(fingers_extended) and not thumb_across_palm:
+        # A - Thumb to side, fingers in a fist
+        if thumb_extended and not any(fingers_extended):
             return 'A'
         
-        # B - All fingers up, thumb folded across palm
-        if all(fingers_extended) and not thumb_extended and thumb_across_palm:
-            # Make sure fingers are close together
-            if index_middle_distance < 0.08:
+        # B - Fingers straight up, thumb across palm
+        if all(fingers_extended) and not thumb_extended:
+            # Fingers must be close together
+            if index_middle_distance < 0.08 and middle_ring_distance < 0.08 and ring_pinky_distance < 0.08:
                 return 'B'
         
-        # C - Curved hand shape (thumb and fingers in C curve)
-        # C has all fingers closed but curved, thumb extended in a C shape
-        if not any(fingers_extended) and thumb_extended and not thumb_across_palm:
-            # Check distance from thumb to index for C shape
-            if 0.08 < thumb_index_distance < 0.2:
+        # C - Hand curved in C shape, thumb and fingers form opening
+        if not any(fingers_extended) and thumb_extended:
+            # Measure curvature and opening
+            # C has fingers curved but not fully closed (partial bend)
+            # Measure the distance from thumb to pinky
+            thumb_pinky_distance = np.sqrt((thumb_tip.x - pinky_tip.x)**2 + (thumb_tip.y - pinky_tip.y)**2)
+            if 0.1 < thumb_pinky_distance < 0.3:
                 return 'C'
         
-        # D - Index up, others closed, thumb touching middle
+        # D - Index up, others curled, thumb touches middle finger
         if index and not middle and not ring and not pinky and thumb_extended:
-            # D has thumb touching middle finger
+            # D requires thumb to touch middle finger
             thumb_middle_distance = np.sqrt((thumb_tip.x - middle_pip.x)**2 + (thumb_tip.y - middle_pip.y)**2)
             if thumb_middle_distance < 0.1:
                 return 'D'
         
-        # E - All fingers curled in, thumb across palm
-        if not any(fingers_extended) and not thumb_extended and thumb_across_palm:
+        # E - All fingers curled, thumb across palm
+        if not any(fingers_extended) and not thumb_extended:
             return 'E'
         
-        # F - Index touching thumb, other fingers up
-        if not index and middle and ring and pinky:
+        # F - Index and thumb touch, other fingers up
+        if not index and middle and ring and pinky and thumb_extended:
             # Check if index and thumb are touching
             if thumb_index_distance < 0.1:
                 return 'F'
         
-        # G - Index pointing outward, thumb across palm
+        # G - Thumb and index pointing forward, fingers curled
         if index and not middle and not ring and not pinky and not thumb_extended:
-            # For G, index points horizontally while thumb is across
-            # Check if index is more horizontal than vertical
-            index_direction = abs(index_tip.x - index_base.x) > abs(index_tip.y - index_base.y)
-            if index_direction and thumb_across_palm:
+            # For G, index points horizontally (sideways)
+            index_horizontal = abs(index_tip.x - index_base.x) > abs(index_tip.y - index_base.y)
+            if index_horizontal:
                 return 'G'
         
-        # H - Index and middle extended side by side
+        # H - Index and middle extended side by side horizontally
         if index and middle and not ring and not pinky:
-            # H has two fingers together, not spread
-            if index_middle_distance < 0.08:
+            # Must be horizontal and fingers close together
+            if not is_vertical and index_middle_distance < 0.08:
                 return 'H'
         
-        # I - Pinky up, other fingers closed
-        if not index and not middle and not ring and pinky:
+        # I - Pinky up, others closed
+        if not index and not middle and not ring and pinky and not thumb_extended:
             return 'I'
         
-        # K - Index and middle up in V, thumb touches middle base
+        # J - Like I but with a motion (can't detect motion in static images)
+        # We can approximate J as I with thumb slightly extended
+        if not index and not middle and not ring and pinky and thumb_extended:
+            # Only if it's not identified as Y (which also has thumb and pinky out)
+            # For J, the hand would typically be more rotated
+            if not is_vertical:
+                return 'J'
+        
+        # K - Index and middle up in V shape, thumb touches hand
         if index and middle and not ring and not pinky and thumb_extended:
-            # K has index and middle up in a V with thumb touching hand
-            if index_middle_distance > 0.08:  # Spread V
-                # Check thumb position more precisely
-                thumb_to_middle_base = np.sqrt((thumb_tip.x - middle_base.x)**2 + (thumb_tip.y - middle_base.y)**2)
-                if thumb_to_middle_base < 0.12:
+            # K has index and middle spread in V shape with thumb touching between them
+            if index_middle_distance > 0.08:
+                thumb_middle_base_distance = np.sqrt((thumb_tip.x - middle_base.x)**2 + (thumb_tip.y - middle_base.y)**2)
+                if thumb_middle_base_distance < 0.1:
                     return 'K'
         
-        # L - Index and thumb out in L shape
+        # L - L shape with thumb and index
         if index and not middle and not ring and not pinky and thumb_extended:
             # L has thumb and index at approx. 90 degrees
             v1 = np.array([index_tip.x - index_base.x, index_tip.y - index_base.y])
             v2 = np.array([thumb_tip.x - index_base.x, thumb_tip.y - index_base.y])
-            v1_norm = np.linalg.norm(v1)
-            v2_norm = np.linalg.norm(v2)
-            if v1_norm > 0 and v2_norm > 0:
-                dot_product = np.dot(v1, v2) / (v1_norm * v2_norm)
-                angle = np.arccos(max(-1.0, min(1.0, dot_product))) * 180 / np.pi
-                if 70 < angle < 110:  # Approximately 90 degrees
-                    return 'L'
+            angle = np.abs(np.cross(v1, v2)) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+            if angle > 0.7:  # Close to 90 degrees
+                return 'L'
         
-        # M - Thumb between fingers
-        if not index and not middle and not ring and not pinky and thumb_across_palm:
-            # More specific check for M vs. E (M has thumb visible between fingers)
-            # M has thumb tucked under fingers, but visible between ring and pinky
-            thumb_position = (thumb_tip.x > ring_tip.x) and (thumb_tip.x < pinky_tip.x)
-            if thumb_position:
-                return 'M'
+        # M - All fingers curled, thumb between fingers
+        if not any(fingers_extended) and not thumb_extended:
+            # Can't easily distinguish from E in static frame
+            # Technically M has thumb tucked between fingers
+            return 'M'
         
-        # N - Thumb between finger
-        if not index and not middle and not ring and not pinky and thumb_across_palm:
-            # N has thumb tucked under fingers, but visible between middle and ring
-            thumb_position = (thumb_tip.x > middle_tip.x) and (thumb_tip.x < ring_tip.x)
-            if thumb_position:
-                return 'N'
+        # N - All fingers curled, thumb between fingers (different position)
+        # N is very similar to M in static frame
         
-        # R - Cross fingers
+        # O - Fingers and thumb form round O
+        if not any(fingers_extended) and thumb_extended:
+            # Detecting circular O shape
+            # Check that thumb is closer to index than in C
+            if thumb_index_distance < 0.1:
+                return 'O'
+        
+        # P - Thumb out, index pointing down, others up
+        if not index and middle and ring and pinky and thumb_extended:
+            # P has index pointing horizontally
+            if not is_vertical:
+                return 'P'
+        
+        # Q - Similar to G but with hand pointing down
+        if index and not middle and not ring and not pinky and not thumb_extended:
+            # For Q, index points downward, which is hard to distinguish in static frame
+            # We'll prioritize G for now, could add hand orientation checks
+            pass
+        
+        # R - Cross fingers (index and middle crossed)
         if index and middle and not ring and not pinky:
             # R has index crossing over middle
-            finger_crossed = (index_tip.x > middle_tip.x) if (wrist.x < middle_base.x) else (index_tip.x < middle_tip.x)
+            finger_crossed = (index_tip.x > middle_tip.x) != (wrist.x < middle_base.x)
             if finger_crossed:
                 return 'R'
         
+        # S - Fist with thumb in front of fingers
+        if not any(fingers_extended) and not thumb_extended:
+            # S is hard to distinguish from E and M in static frame
+            # Technically S has thumb wrapped in front of fingers
+            pass
+        
         # T - Thumb between index and middle
         if not index and not middle and not ring and not pinky and thumb_extended:
-            # T has thumb between index and middle
-            thumb_between = (thumb_tip.x > index_tip.x) and (thumb_tip.x < middle_tip.x)
-            if thumb_between:
-                return 'T'
+            # T has thumb between index and middle fingers
+            return 'T'
         
-        # U - Index and middle parallel
+        # U - Index and middle together pointing up
         if index and middle and not ring and not pinky and not thumb_extended:
-            # U has two fingers parallel
+            # U has two fingers parallel and close
             if index_middle_distance < 0.08:
                 return 'U'
         
-        # V - Index and middle in V
+        # V - Index and middle in V shape
         if index and middle and not ring and not pinky:
             # V has fingers spread
             if index_middle_distance > 0.08:
-                return 'V'
+                # Make sure not K (which has thumb extended)
+                if not thumb_extended:
+                    return 'V'
+                else:
+                    # Could be V or K, check thumb position more precisely
+                    thumb_middle_base_distance = np.sqrt((thumb_tip.x - middle_base.x)**2 + (thumb_tip.y - middle_base.y)**2)
+                    if thumb_middle_base_distance > 0.1:
+                        return 'V'
         
         # W - Index, middle, ring extended
         if index and middle and ring and not pinky:
-            return 'W'
+            # W has three fingers spread
+            if (index_middle_distance > 0.05) and (middle_ring_distance > 0.05):
+                return 'W'
+        
+        # X - Index bent, like halfway between X and E
+        if not any(fingers_extended):
+            # X has index finger slightly bent
+            # Hard to detect in static frame but we could check partial extension
+            pass
         
         # Y - Thumb and pinky extended
         if not index and not middle and not ring and pinky and thumb_extended:
-            return 'Y'
-
+            # Y has thumb and pinky out, must be vertical
+            if is_vertical:
+                return 'Y'
+        
+        # Z - Requires motion (can't detect in static frame)
+        # Z traces the shape of Z in the air
+        
         return None
     except Exception as e:
         print(f"Error in detect_letter: {str(e)}")
@@ -418,9 +422,9 @@ def main():
                 cv2.putText(
                     image,
                     f"Sign: {detected_letter}",
-                    (image.shape[1]//2 - 50, 50),
+                    (image.shape[1]//2 - 40, 50),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    1.5,
+                    1.2,
                     (0, 0, 255),
                     2
                 )
