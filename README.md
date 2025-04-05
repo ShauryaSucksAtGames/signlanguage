@@ -1,61 +1,42 @@
-# Sign Language Detector for Raspberry Pi 4
+# ASL Sign Language Detector for Raspberry Pi 4
 
-A sign language detector optimized for Raspberry Pi 4 with 2GB RAM running 32-bit Raspberry Pi OS (Buster). This application uses MediaPipe for accurate hand tracking and sign language detection.
+A real-time American Sign Language (ASL) detector optimized for Raspberry Pi 4 with 2GB RAM running 32-bit Raspberry Pi OS (Buster). This application uses MediaPipe for hand tracking and rule-based detection to recognize ASL letters.
 
-## Hardware Requirements
-- Raspberry Pi 4 (2GB RAM)
-- Pi Camera Module v1.3 or v2.0
-- Display (for direct viewing)
+## Overview
 
-## System Requirements
-- Raspberry Pi OS (Legacy) - Buster 32-bit
+This project combines pre-trained machine learning with rule-based recognition to efficiently detect American Sign Language (ASL) hand signs on resource-constrained Raspberry Pi hardware. It focuses on static fingerspelling letters and prioritizes real-time performance.
 
-## Installation
+### How It Works
 
-1. Update your system:
+1. **Hand Detection & Tracking**: Uses MediaPipe's pre-trained ML model to detect 21 landmarks on the hand
+2. **Feature Extraction**: Analyzes finger positions, orientations, and relationships
+3. **Rule-Based Detection**: Applies customized geometric rules for each ASL letter
+4. **Real-time Visualization**: Displays the detected sign with confidence level
+
+## Supported ASL Signs
+
+This detector recognizes the following ASL letters:
+- A, B, C, D, E, F, G, H, I, K, L, O, R, S, T, U, V, W, Y
+
+Notes:
+- J and Z require motion and are not supported (this detector only handles static signs)
+- Q, P, M, and N have been removed from detection
+
+## Getting Started
+
+### Prerequisites
+
+Before proceeding with this guide, follow the instructions in [RASPBERRY_PI_SETUP.md](RASPBERRY_PI_SETUP.md) to:
+1. Set up your Raspberry Pi with the correct OS
+2. Configure networking and camera
+3. Optimize the Pi's performance
+4. Clone this repository and create a virtual environment
+
+### Python Dependencies Installation
+
+With your virtual environment activated, install dependencies in this specific order:
+
 ```bash
-sudo apt-get update
-sudo apt-get upgrade
-```
-
-2. Install required system dependencies:
-```bash
-sudo apt-get install -y libatlas-base-dev
-sudo apt-get install -y libjasper1
-sudo apt-get install -y libqtgui4
-sudo apt-get install -y libqt4-test
-sudo apt-get install -y libhdf5-dev
-sudo apt-get install -y libhdf5-serial-dev
-sudo apt-get install -y libharfbuzz0b
-sudo apt-get install -y libwebp6
-sudo apt-get install -y libtiff5
-sudo apt-get install -y libjasper-dev
-sudo apt-get install -y libilmbase23
-sudo apt-get install -y libopenexr23
-sudo apt-get install -y libgstreamer1.0-0
-sudo apt-get install -y libavcodec58
-sudo apt-get install -y libavformat58
-sudo apt-get install -y libswscale5
-```
-
-3. Set up Python virtual environment:
-```bash
-# Install venv
-sudo apt-get install -y python3-venv
-
-# Create virtual environment
-python3 -m venv sign_env
-source sign_env/bin/activate
-
-# Upgrade pip
-pip3 install --upgrade pip setuptools wheel
-```
-
-4. Install Python dependencies (CRITICAL: follow this exact order):
-```bash
-# Upgrade pip, setuptools, and wheel
-pip3 install --upgrade pip setuptools wheel
-
 # First install numpy (must be installed BEFORE other packages)
 pip3 install numpy==1.17.3
 
@@ -68,73 +49,77 @@ pip3 install protobuf==3.20.0
 # Install opencv-headless (specific version)
 pip3 install opencv-python-headless==3.4.3.18
 
-# Install remaining dependencies from requirements.txt
+# Install remaining dependencies
 pip3 install -r requirements.txt
 ```
 
-5. Enable the camera interface:
-```bash
-sudo raspi-config
-```
-Navigate to "Interface Options" > "Camera" and enable it.
+### Running the ASL Detector
 
-6. Reboot your Pi:
-```bash
-sudo reboot
-```
+To start the sign language detector:
 
-## Usage
-
-Run the sign language detector:
 ```bash
-source sign_env/bin/activate
 python3 sign_language_detector.py
 ```
-
-The program will:
-- Open a window showing the camera feed
-- Track your hand using MediaPipe
-- Recognize sign language gestures
 
 ### Key Controls
 - Press 'q' to quit the program
 - Press 'd' to toggle debug mode on/off
 
-### Debug Mode
-Debug mode shows:
-- The status of each finger (UP/DOWN)
-- Hand orientation (Vertical/Horizontal)
-- Highlights finger tips and bases
-- Helps you understand why signs may not be recognized correctly
+## Debug Mode
 
-## Features
-- MediaPipe hand tracking for accurate gesture recognition
-- Real-time processing optimized for Raspberry Pi
-- Low memory usage
-- Simple and intuitive interface
-- Debug mode for troubleshooting
+Debug mode displays extensive information to help improve sign detection:
+- **Finger Status**: Shows each finger's state (EXTENDED, CLOSED, PARTIALLY BENT, HALF BENT)
+- **Thumb Position**: Shows if thumb is IN or OUT
+- **Hand Orientation**: Shows if the hand is in Vertical or Horizontal orientation
+- **Visual Markers**: Highlights the detected hand landmarks with colored points and lines
+
+## Sign Detection Guidelines
+
+For optimal detection accuracy:
+
+1. **Lighting**: Use consistent, well-lit environments
+2. **Hand Position**: Keep your hand about 12-24 inches from the camera
+3. **Orientation**: Match the expected orientation for each sign:
+   - Most letters: Vertical orientation
+   - G, H: Horizontal orientation
+4. **Clear Formation**: Make deliberate, clear hand shapes
+5. **Fingers**: Pay attention to proper finger positioning:
+   - For 'Y': Clearly extend thumb and pinky outward
+   - For 'I': Keep pinky extended, thumb tucked, other fingers closed
+   - For 'R': Keep index and middle fingers extended but close together
 
 ## Troubleshooting
 
-If you encounter errors:
+If you encounter issues with sign detection:
 
-1. Numpy/MediaPipe errors:
-   - Make sure to install dependencies in the exact order shown above
-   - Try removing the virtual environment and creating a new one
+1. **Enable Debug Mode**: Press 'd' to see finger states and hand orientation
+2. **Check Lighting**: Ensure consistent, adequate lighting on your hand
+3. **Adjust Hand Position**: Try different distances and angles
+4. **Clear Hand Shapes**: Make deliberate, clear hand shapes for each sign
+5. **Camera Focus**: Ensure the camera can clearly see your hand details
 
-2. Camera issues:
-   - Ensure the camera is properly connected and enabled in raspi-config
-   - Check for sufficient lighting when using the detector
+For system-related issues, refer to the Troubleshooting section in [RASPBERRY_PI_SETUP.md](RASPBERRY_PI_SETUP.md).
 
-3. Display issues:
-   - If using over SSH, make sure X11 forwarding is enabled
-   - For direct display, ensure your display is properly connected
+## Technical Details
 
-4. Recognition accuracy issues:
-   - Use debug mode ('d' key) to see the finger detection status
-   - Adjust your hand position based on the debug information
-   - Try different lighting conditions
-   - Make clear and distinct hand shapes
+See [DOCUMENTATION.md](DOCUMENTATION.md) for detailed technical information about:
+- Detection algorithms and implementation
+- System architecture
+- Performance considerations
+- Future development possibilities
 
-## Notes
-This application is specifically optimized for Raspberry Pi 4 with 2GB RAM. It uses MediaPipe's hand tracking which is efficient enough to run on this hardware while providing accurate hand gesture recognition. 
+## Limitations
+
+1. **Static Signs Only**: Only detects non-moving signs (excludes J, Z which require motion)
+2. **Single Hand**: Only one hand is detected at a time
+3. **Lighting Dependent**: Performance degrades in poor lighting
+4. **Frame Rate**: Real-time but limited to ~15fps on Raspberry Pi 4
+5. **Similar Signs**: Some visually similar signs (like K/V, H/U) may be confused
+
+## Credits
+
+This project uses:
+- **MediaPipe**: Google's ML framework for hand tracking
+- **OpenCV**: For image processing and visualization
+- **NumPy**: For numerical operations
+- **PiCamera**: For Raspberry Pi camera integration 
