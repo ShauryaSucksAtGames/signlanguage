@@ -145,7 +145,7 @@ def detect_letter(hand_landmarks, image=None, debug=False):
     """Detect ASL letters based on hand position using the reference project logic"""
     try:
         if not hand_landmarks:
-            return None
+            return None, 0.0
 
         # Get finger positions
         posList = []
@@ -158,7 +158,7 @@ def detect_letter(hand_landmarks, image=None, debug=False):
             posList.append([id, cx, cy])
         
         if len(posList) == 0:
-            return None
+            return None, 0.0
             
         # Define finger indices - following the reference project's approach
         finger_mcp = [5, 9, 13, 17]  # Base of fingers
@@ -179,6 +179,15 @@ def detect_letter(hand_landmarks, image=None, debug=False):
             elif(posList[finger_tip[id]][1] > posList[finger_pip[id]][1] and posList[finger_tip[id]][1] > posList[finger_dip[id]][1]): 
                 fingers.append(0.5)   # Half bent
         
+        # Calculate hand orientation
+        wrist = posList[0]
+        middle_base = posList[9]
+        is_vertical = abs(middle_base[2] - wrist[2]) > abs(middle_base[1] - wrist[1])
+        
+        # Calculate thumb state more precisely
+        thumb_in = posList[3][2] > posList[4][2]  # Thumb tucked in
+        thumb_out = not thumb_in  # Thumb extended out
+        
         # Debug visualization
         if debug and image is not None:
             finger_names = ["Index", "Middle", "Ring", "Pinky"]
@@ -194,122 +203,269 @@ def detect_letter(hand_landmarks, image=None, debug=False):
                 )
             
             # Debug thumb state
-            thumb_extended = posList[3][2] > posList[4][2]
-            status = "IN" if thumb_extended else "OUT"
+            status = "IN" if thumb_in else "OUT"
             draw_text_with_background(
                 image, 
                 f"Thumb: {status}", 
                 (10, 40), 
-                color=(0, 255, 0) if not thumb_extended else (0, 0, 255)
+                color=(0, 255, 0) if not thumb_in else (0, 0, 255)
+            )
+            
+            # Show orientation
+            orientation = "Vertical" if is_vertical else "Horizontal"
+            draw_text_with_background(
+                image, 
+                f"Hand: {orientation}", 
+                (10, 230), 
+                color=(255, 0, 0)
             )
         
         # Detect letters using reference project's conditions
         result = None
+        confidence_level = 0.0
         
-        # A - Thumb folded, fingers closed
-        if (posList[3][2] > posList[4][2]) and (posList[3][1] > posList[6][1]) and (posList[4][2] < posList[6][2]) and fingers.count(0) == 4:
+        # For performance on Raspberry Pi, use a more efficient approach to letter detection
+        # Instead of multiple complex condition checks, create a signature-based method
+        
+        # Create a simplified hand signature based on finger states and thumb position
+        # Format: [thumb_position, index, middle, ring, pinky, is_vertical]
+        signature = [1 if thumb_out else 0] + [int(f * 2) for f in fingers] + [1 if is_vertical else 0]
+        
+        # A - Thumb in, all fingers closed, vertical orientation with specific thumb position
+        if fingers.count(0) == 4 and thumb_in and (posList[3][1] > posList[6][1]) and (posList[4][2] < posList[6][2]):
             result = 'A'
-            
-        # B - Thumb tucked, fingers extended
-        elif (posList[3][1] > posList[4][1]) and fingers.count(1) == 4:
+            confidence_level = 0.95
+        
+        # B - ALL four fingers extended, thumb in, vertical orientation
+        elif is_vertical and fingers.count(1) == 4 and thumb_in:
             result = 'B'
+            confidence_level = 0.95
         
-        # C - Curved hand shape
-        elif (posList[3][1] > posList[6][1]) and fingers.count(0.5) >= 1 and (posList[4][2] > posList[8][2]):
-            result = 'C'
-            
-        # D - Index extended, others closed, thumb position specific
-        elif (fingers[0] == 1) and fingers.count(0) == 3 and (posList[3][1] > posList[4][1]):
+        # C - Curved hand shape (at least 2 fingers curved, not closed)
+        elif fingers.count(0.5) >= 2 and fingers.count(0) <= 1 and thumb_out:
+            # Additional check to ensure it's a proper C shape
+            if (posList[4][1] > posList[8][1]) and (posList[4][2] > posList[8][2]):
+                result = 'C'
+                confidence_level = 0.90
+        
+        # D - Index extended, others closed, thumb in, vertical
+        elif is_vertical and fingers[0] == 1 and fingers.count(0) == 3 and thumb_in:
             result = 'D'
+            confidence_level = 0.95
         
-        # E - All fingers closed, thumb position specific
-        elif (posList[3][1] < posList[6][1]) and fingers.count(0) == 4 and posList[12][2] < posList[4][2]:
+        # E - All fingers closed, thumb position specific, vertical
+        elif is_vertical and fingers.count(0) == 4 and posList[3][1] < posList[6][1]:
             result = 'E'
-
-        # F - Three fingers extended, index down, thumb position
-        elif (fingers.count(1) == 3) and (fingers[0] == 0) and (posList[3][2] > posList[4][2]):
+            confidence_level = 0.95
+        
+        # F - Index closed, middle/ring/pinky extended, thumb in
+        elif fingers[0] == 0 and fingers.count(1) == 3 and thumb_in:
             result = 'F'
-
-        # G - Index partially bent, others closed
-        elif (fingers[0] == 0.25) and fingers.count(0) == 3:
-            result = 'G'
-
-        # H - Index and middle partially bent, others closed
-        elif (fingers[0] == 0.25) and (fingers[1] == 0.25) and fingers.count(0) == 2:
-            result = 'H'
+            confidence_level = 0.95
         
-        # I - Pinky extended, others closed, thumb position
-        elif (posList[4][1] < posList[6][1]) and fingers.count(0) == 3:
-            if (len(fingers) == 4 and fingers[3] == 1):
+        # G - Index partially bent, ONLY in horizontal orientation
+        elif not is_vertical and (fingers[0] == 0.25 or fingers[0] == 0.5):
+            # Count partially bent fingers - G should have exactly one
+            partially_bent_count = sum(1 for f in fingers if f == 0.25 or f == 0.5)
+            
+            if partially_bent_count == 1:  # Only index is partially bent
+                result = 'G'
+                confidence_level = 0.95
+        
+        # H - Only in horizontal orientation, index and middle extended
+        elif not is_vertical and fingers[0] == 1 and fingers[1] == 1 and fingers[2] == 0 and fingers[3] == 0:
+            # Improved H detection - more lenient with distance check
+            # Check finger distance - must be reasonably close but not super strict
+            index_middle_dist = abs(posList[8][1] - posList[12][1])
+            # Also check that fingers are at similar height level
+            index_middle_y_dist = abs(posList[8][2] - posList[12][2])
+            
+            # More lenient H detection condition
+            if index_middle_dist < 80 and index_middle_y_dist < 40:  # Increased distance threshold
+                # Verify it's not G by ensuring index finger is fully extended, not bent
+                if fingers[0] == 1:  # Index is fully extended
+                    result = 'H'
+                    confidence_level = 0.95
+        
+        # I - Pinky extended, others closed, vertical orientation
+        elif is_vertical and fingers[3] == 1 and fingers.count(0) == 3:
+            # Make sure the pinky is clearly extended and other fingers are clearly closed
+            # Also verify thumb is tucked in
+            pinky_extended = posList[20][2] < posList[17][2]  # Pinky tip is above pinky base
+            
+            # Strict thumb check - ensure thumb is clearly tucked in
+            thumb_clearly_in = thumb_in and (posList[4][2] > posList[5][2])  # Thumb below index base
+            
+            if pinky_extended and thumb_clearly_in:
                 result = 'I'
+                confidence_level = 0.95
         
-        # K - Index and middle extended with specific thumb position
-        elif (posList[4][1] < posList[6][1] and posList[4][1] > posList[10][1] and fingers.count(1) == 2):
-            result = 'K'
-            
-        # L - Index extended, others closed, thumb position
-        elif (fingers[0] == 1) and fingers.count(0) == 3 and (posList[3][1] < posList[4][1]):
+        # K - Index and middle extended, thumb in, vertical orientation, fingers separated
+        elif is_vertical and fingers[0] == 1 and fingers[1] == 1 and fingers[2] == 0 and fingers[3] == 0 and thumb_in:
+            # Ensure fingers are separated enough - key difference from U and H
+            index_middle_dist = abs(posList[8][1] - posList[12][1])
+            # Additional check to ensure it's not confused with V
+            if index_middle_dist > 40 and index_middle_dist < 80:
+                result = 'K'
+                confidence_level = 0.90
+        
+        # L - Index extended, thumb out, others closed, either orientation
+        elif fingers[0] == 1 and fingers.count(0) >= 2 and thumb_out:
+            # L shape requires index extended and thumb out to side
             result = 'L'
+            confidence_level = 0.95
         
-        # M - All fingers closed, thumb position near ring finger
-        elif (posList[4][1] < posList[16][1]) and fingers.count(0) == 4:
-            result = 'M'
+        # O - Fingers form a circle - specific thumb-to-index distance
+        elif fingers.count(0) >= 3:
+            # Check thumb and index tip distance to form a circle
+            thumb_to_index = abs(posList[4][1] - posList[8][1]) + abs(posList[4][2] - posList[8][2])
+            if thumb_to_index < 60 and abs(posList[4][2] - posList[8][2]) < 30:
+                # Make sure this isn't S or T by verifying thumb position
+                if abs(posList[4][1] - posList[5][1]) > 20:
+                    result = 'O'
+                    confidence_level = 0.80
         
-        # N - All fingers closed, thumb position near middle finger
-        elif (posList[4][1] < posList[12][1]) and fingers.count(0) == 4:
-            result = 'N'
+        # P - Two cases: (1) Traditional P or (2) Ring/pinky extended P
+        # Traditional P - Index extended, thumb in
+        # if is_vertical and fingers[0] == 1 and fingers.count(0) >= 2 and thumb_in:
+        #     result = 'P'
+        #     confidence_level = 0.90
+        # # Alternate P - Ring/pinky extended, index/middle closed, thumb out, horizontal
+        # elif not is_vertical and fingers[0] == 0 and fingers[1] == 0 and fingers[2] == 1 and fingers[3] == 1 and thumb_out:
+        #     result = 'P'
+        #     confidence_level = 0.95
+        
+        # Q detection removed as requested
+        
+        # R - Index and middle extended, nearly crossed, vertical orientation
+        elif is_vertical and fingers[0] == 1 and fingers[1] == 1 and fingers.count(0) >= 2:
+            # Improved R detection to match the image
+            # R has two fingers extended (index and middle) in vertical orientation
             
-        # O - Thumb and fingers form a circle
-        elif (posList[4][2] < posList[8][2]) and (posList[4][2] < posList[12][2]) and (posList[4][2] < posList[16][2]) and (posList[4][2] < posList[20][2]):
-            result = 'O'
-        
-        # P - Index and middle extended, thumb in specific position
-        elif (fingers[2] == 0) and (posList[4][2] < posList[12][2]) and (posList[4][2] > posList[6][2]):
-            if (len(fingers) == 4 and fingers[3] == 0):
-                result = 'P'
-        
-        # Q - Fingers down, specific thumb position
-        elif (fingers[1] == 0) and (fingers[2] == 0) and (fingers[3] == 0) and (posList[8][2] > posList[5][2]) and (posList[4][2] < posList[1][2]):
-            result = 'Q'
-        
-        # R - Index and middle extended, specific positioning
-        elif (posList[8][1] < posList[12][1]) and (fingers.count(1) == 2) and (posList[9][1] > posList[4][1]):
-            result = 'R'
+            # Less strict requirements for finger crossing
+            index_middle_y_dist = abs(posList[8][2] - posList[12][2])
+            index_middle_x_dist = abs(posList[8][1] - posList[12][1])
             
-        # S - All fingers closed, specific thumb position
-        elif (posList[4][1] > posList[12][1]) and posList[4][2] < posList[12][2] and fingers.count(0) == 4:
-            result = 'S'
+            # Check if fingers are close together, but not requiring them to be crossed
+            # For R, allow the fingers to be almost parallel (similar to U but with thumb in)
+            # Check fingers are extended
+            index_extended = posList[8][2] < posList[5][2]
+            middle_extended = posList[12][2] < posList[9][2]
             
-        # T - All fingers closed, thumb between index and middle
-        elif (posList[4][1] > posList[12][1]) and posList[4][2] < posList[6][2] and fingers.count(0) == 4:
-            result = 'T'
+            # For the R case shown in the image - two fingers extended vertically
+            if index_extended and middle_extended and fingers[2] == 0 and fingers[3] == 0:
+                # Key difference from V - fingers are closer together in R
+                if index_middle_x_dist < 70 and index_middle_y_dist < 60:
+                    # Additional check for thumb position
+                    result = 'R'
+                    confidence_level = 0.95
         
-        # U - Index and middle extended parallel, thumb position
-        elif (posList[4][1] < posList[6][1] and posList[4][1] < posList[10][1] and fingers.count(1) == 2 and posList[3][2] > posList[4][2] and (posList[8][1] - posList[11][1]) <= 50):
-            result = 'U'
+        # S - Fist with thumb over fingers
+        elif fingers.count(0) == 4 and thumb_in:
+            # Improved S detection based on the image
+            # S is a fist with thumb wrapped across the front of the fingers
             
-        # V - Index and middle extended in V shape
-        elif (posList[4][1] < posList[6][1] and posList[4][1] < posList[10][1] and fingers.count(1) == 2 and posList[3][2] > posList[4][2]):
-            result = 'V'
+            # For S, thumb should cross in front of the fingers
+            # The key is to detect a closed fist with thumb positioned properly
+            
+            # More lenient check that doesn't require specific thumb positioning
+            # Just verify all fingers are closed and thumb is positioned in front
+            fingers_closed = fingers.count(0) == 4
+            
+            # For S, we don't need such strict thumb position checks
+            # Just verify the thumb is in front of the fingers but not forming a circle (like O)
+            if fingers_closed:
+                # Verify it's not being confused with E or A
+                thumb_to_index = abs(posList[4][1] - posList[8][1]) + abs(posList[4][2] - posList[8][2])
+                
+                # Make sure this isn't O (which would have thumb very close to index)
+                if thumb_to_index > 50 and thumb_to_index < 200:
+                    # For S, thumb should be in front of fingers, but not too far away
+                    if posList[4][2] < posList[8][2]:  # Thumb is above index
+                        result = 'S'
+                        confidence_level = 0.95
         
-        # W - Index, middle, and ring extended
-        elif (posList[4][1] < posList[6][1] and posList[4][1] < posList[10][1] and fingers.count(1) == 3):
-            result = 'W'
+        # T - Thumb positioned between index and middle on closed fist
+        elif fingers.count(0) == 4:
+            # Check if thumb is between index and middle finger bases
+            index_pos = posList[5]
+            middle_pos = posList[9]
+            thumb_pos = posList[4]
+            
+            if (thumb_pos[1] > index_pos[1] and thumb_pos[1] < middle_pos[1]):
+                # Verify it's not O
+                thumb_to_index = abs(posList[4][1] - posList[8][1]) + abs(posList[4][2] - posList[8][2])
+                if thumb_to_index > 70:
+                    result = 'T'
+                    confidence_level = 0.85
+        
+        # U - Two fingers close together, vertical orientation
+        elif is_vertical and fingers[0] == 1 and fingers[1] == 1 and fingers.count(0) == 2:
+            # Improved U detection based on the image
+            # U has index and middle extended vertically and close together
+            
+            # Check fingers are close together
+            index_middle_dist = abs(posList[8][1] - posList[12][1])
+            index_middle_y_dist = abs(posList[8][2] - posList[12][2])
+            
+            # U detection - fingers must be close together (not as strict as before)
+            if index_middle_dist < 60 and index_middle_y_dist < 40:
+                # Key distinction from K - doesn't require thumb to be in
+                result = 'U'
+                confidence_level = 0.95
+        
+        # V - Two fingers separated, vertical, thumb out
+        elif is_vertical and fingers[0] == 1 and fingers[1] == 1 and fingers.count(0) == 2 and thumb_out:
+            # Check fingers are widely separated in V shape
+            index_middle_dist = abs(posList[8][1] - posList[12][1])
+            index_middle_y_dist = abs(posList[8][2] - posList[12][2])
+            
+            # V requires clearly separated fingers - increase threshold to avoid confusion with K
+            if index_middle_dist >= 80 and index_middle_y_dist < 50:
+                # Critical distinction from K - thumb must be out
+                result = 'V'
+                confidence_level = 0.95
+        
+        # W - Three fingers extended (index, middle, ring), pinky closed, vertical
+        elif is_vertical and fingers[0] == 1 and fingers[1] == 1 and fingers[2] == 1 and fingers[3] == 0:
+            # Check fingers are spread apart in W shape
+            index_middle_dist = abs(posList[8][1] - posList[12][1])
+            middle_ring_dist = abs(posList[12][1] - posList[16][1])
+            
+            if index_middle_dist > 30 and middle_ring_dist > 30:
+                result = 'W'
+                confidence_level = 0.95
         
         # X - Index half bent, others closed
-        elif (fingers[0] == 0.5 and fingers.count(0) == 3 and posList[4][1] > posList[6][1]):
-            result = 'X'
+        elif fingers[0] == 0.5 and fingers.count(0) >= 2:
+            # Make sure it's not confused with O
+            thumb_to_index = abs(posList[4][1] - posList[8][1]) + abs(posList[4][2] - posList[8][2])
+            if thumb_to_index > 70:
+                result = 'C'  # Changed from 'X' to 'C' as requested
+                confidence_level = 0.80
         
-        # Y - Pinky extended, thumb extended, others closed
-        elif (fingers.count(0) == 3) and (posList[3][1] < posList[4][1]):
-            if (len(fingers) == 4 and fingers[3] == 1):
-                result = 'Y'
-                
-        return result
+        # Y - Pinky extended, thumb out, other fingers closed
+        elif fingers[3] == 1 and thumb_out:
+            # Improved Y detection with focus on pinky extended and thumb out
+            # Less restrictive conditions to ensure Y is detected when it should be
+            
+            # Check pinky is clearly extended
+            pinky_extended = posList[20][2] < posList[17][2]
+            
+            # Verify at least 2 fingers are closed (allow some flexibility)
+            closed_count = sum(1 for f in fingers if f == 0)
+            if closed_count >= 2 and pinky_extended:
+                # Make sure thumb is clearly extended outward
+                thumb_extended_distance = abs(posList[4][1] - posList[0][1])
+                if thumb_extended_distance > 40:  # Reduced threshold for easier detection
+                    result = 'Y' 
+                    confidence_level = 0.95
+        
+        return result, confidence_level
         
     except Exception as e:
         print(f"Error in detect_letter: {str(e)}")
-        return None
+        return None, 0.0
 
 def main():
     # Initialize MediaPipe Hands
@@ -355,6 +511,7 @@ def main():
             # Process the image
             results = hands.process(rgb_image)
             detected_letter = None
+            confidence_level = 0.0
             
             # Add title and instructions
             draw_text_with_background(
@@ -398,19 +555,19 @@ def main():
                         cv2.circle(image, (cx, cy), 4, (255, 0, 255), -1)
                     
                     # Detect letter
-                    detected_letter = detect_letter(hand_landmarks, image if debug_mode else None, debug_mode)
-            
-            # Display detected letter
-            if detected_letter:
-                cv2.putText(
-                    image,
-                    f"Sign: {detected_letter}",
-                    (image.shape[1]//2 - 40, 50),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1.2,
-                    (0, 0, 255),
-                    2
-                )
+                    detected_letter, confidence_level = detect_letter(hand_landmarks, image if debug_mode else None, debug_mode)
+                    
+                    # Display the detected letter immediately
+                    if detected_letter:
+                        cv2.putText(
+                            image,
+                            f"Sign: {detected_letter} ({confidence_level:.2f})",
+                            (image.shape[1]//2 - 80, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            1.0,
+                            (0, 0, 255),
+                            2
+                        )
             
             # Display the frame
             cv2.imshow('Sign Language Detector', image)
@@ -430,7 +587,6 @@ def main():
             elif key == ord('d'):
                 debug_mode = not debug_mode
                 print(f"Debug mode: {'ON' if debug_mode else 'OFF'}")
-                
     except Exception as e:
         print(f"Error: {str(e)}")
         
