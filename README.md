@@ -1,26 +1,25 @@
-# Raspberry Pi Sign Language Detector
+# Sign Language Detector for Raspberry Pi 4
 
-This project implements real-time sign language alphabet detection using a Raspberry Pi 4 and Pi Camera. It uses MediaPipe Hands for hand tracking and OpenCV headless for image processing.
+A sign language detector optimized for Raspberry Pi 4 with 2GB RAM running 32-bit Raspberry Pi OS (Buster). This application uses MediaPipe for accurate hand tracking and sign language detection.
 
 ## Hardware Requirements
 - Raspberry Pi 4 (2GB RAM)
-- Pi Camera v1.3
-- Raspberry Pi OS (Legacy) - Buster 32-bit
+- Pi Camera Module v1.3 or v2.0
+- Display (for direct viewing)
 
-## Software Requirements
-- Python 3.7+
-- OpenCV 3.4.3.18 (headless)
-- MediaPipe for Raspberry Pi
-- PiCamera module
-- Flask (for web interface)
+## System Requirements
+- Raspberry Pi OS (Legacy) - Buster 32-bit
 
 ## Installation
 
-1. First, ensure your Raspberry Pi is running Raspberry Pi OS (Legacy) - Buster 32-bit.
-
-2. Install system dependencies:
+1. Update your system:
 ```bash
 sudo apt-get update
+sudo apt-get upgrade
+```
+
+2. Install required system dependencies:
+```bash
 sudo apt-get install -y libatlas-base-dev
 sudo apt-get install -y libjasper1
 sudo apt-get install -y libqtgui4
@@ -44,32 +43,32 @@ sudo apt-get install -y libswscale5
 # Install venv
 sudo apt-get install -y python3-venv
 
-# Remove existing venv if any
-rm -rf virt
-
-# Create new venv
-python3 -m venv virt
-source virt/bin/activate
+# Create virtual environment
+python3 -m venv sign_env
+source sign_env/bin/activate
 
 # Upgrade pip
 pip3 install --upgrade pip setuptools wheel
 ```
 
-4. Install Python dependencies (EXACT ORDER IS IMPORTANT):
+4. Install Python dependencies (CRITICAL: follow this exact order):
 ```bash
-# First install numpy
+# Upgrade pip, setuptools, and wheel
+pip3 install --upgrade pip setuptools wheel
+
+# First install numpy (must be installed BEFORE other packages)
 pip3 install numpy==1.17.3
 
-# Install protobuf (required for mediapipe)
-pip3 install protobuf==3.20.0
-
-# Install matplotlib (required by mediapipe)
+# Install matplotlib (with specific version compatible with numpy 1.17.3)
 pip3 install matplotlib==3.3.4
 
-# Install OpenCV headless
+# Install protobuf (required for MediaPipe)
+pip3 install protobuf==3.20.0
+
+# Install opencv-headless (specific version)
 pip3 install opencv-python-headless==3.4.3.18
 
-# Install remaining dependencies
+# Install remaining dependencies from requirements.txt
 pip3 install -r requirements.txt
 ```
 
@@ -79,108 +78,63 @@ sudo raspi-config
 ```
 Navigate to "Interface Options" > "Camera" and enable it.
 
-6. Reboot your Raspberry Pi:
+6. Reboot your Pi:
 ```bash
 sudo reboot
 ```
 
 ## Usage
 
-### VNC Version (Local Display)
-1. Activate virtual environment:
+Run the sign language detector:
 ```bash
-source virt/bin/activate
-```
-
-2. Run the script:
-```bash
+source sign_env/bin/activate
 python3 sign_language_detector.py
 ```
 
-3. The program will:
-   - Open your Pi Camera feed in a window
-   - Detect hand landmarks in real-time
-   - Display the detected sign language letter
-   - Show hand tracking visualization
+The program will:
+- Open a window showing the camera feed
+- Track your hand using MediaPipe
+- Recognize sign language gestures
 
-4. Press 'q' to quit the program
+### Key Controls
+- Press 'q' to quit the program
+- Press 'd' to toggle debug mode on/off
 
-### Web Interface Version (Remote Access)
-1. Activate virtual environment:
-```bash
-source virt/bin/activate
-```
+### Debug Mode
+Debug mode shows:
+- The status of each finger (UP/DOWN)
+- Hand orientation (Vertical/Horizontal)
+- Highlights finger tips and bases
+- Helps you understand why signs may not be recognized correctly
 
-2. Run the web interface:
-```bash
-python3 web_sign_language_detector.py
-```
-
-3. Access the web interface:
-   - Open a web browser on any device connected to your network
-   - Navigate to `http://<raspberry-pi-ip>:5000`
-   - Replace `<raspberry-pi-ip>` with your Raspberry Pi's IP address
-
-4. Press Ctrl+C in the terminal to quit the program
-
-## Notes
-- The current implementation includes basic detection for letters A, B, C, and D
-- The detection is based on hand landmark positions and angles
-- For best results:
-  - Ensure good lighting
-  - Keep your hand clearly visible to the camera
-  - Position your hand at a comfortable distance from the camera
-
-## Performance Tips
-- The script is optimized for Raspberry Pi 4 with 2GB RAM
-- If you experience performance issues:
-  - The camera resolution is already set to 320x240 for optimal performance
-  - The framerate is set to 15 FPS to balance performance and smoothness
-  - The JPEG quality is set to 80% for efficient streaming
-  - Garbage collection runs every 30 frames to manage memory
-- For better performance:
-  - Close other applications while running this program
-  - Ensure your Raspberry Pi is well-ventilated
-  - Consider using a USB fan for extended use
+## Features
+- MediaPipe hand tracking for accurate gesture recognition
+- Real-time processing optimized for Raspberry Pi
+- Low memory usage
+- Simple and intuitive interface
+- Debug mode for troubleshooting
 
 ## Troubleshooting
 
-### Common Installation Issues
-- If you get numpy/matplotlib errors:
-  ```bash
-  # Deactivate and remove virtual environment
-  deactivate
-  rm -rf virt
-  
-  # Create new virtual environment
-  python3 -m venv virt
-  source virt/bin/activate
-  
-  # Install dependencies in correct order
-  pip3 install --upgrade pip setuptools wheel
-  pip3 install numpy==1.17.3
-  pip3 install protobuf==3.20.0
-  pip3 install matplotlib==3.3.4
-  pip3 install opencv-python-headless==3.4.3.18
-  pip3 install -r requirements.txt
-  ```
+If you encounter errors:
 
-- If you get "module compiled against API version" error:
-  - Follow the installation steps in EXACT order
-  - Make sure to install numpy FIRST
-  - Then install matplotlib BEFORE other packages
-  - Clean and recreate virtual environment if needed
+1. Numpy/MediaPipe errors:
+   - Make sure to install dependencies in the exact order shown above
+   - Try removing the virtual environment and creating a new one
 
-### Other Issues
-- If you get other dependency errors:
-  - Make sure you've installed all system dependencies listed above
-  - Try running `sudo apt-get update` and `sudo apt-get upgrade`
-  - Check if your Python virtual environment is activated
-- If the camera is not detected:
-  - Check if the camera is properly connected
-  - Verify camera is enabled in raspi-config
-  - Try rebooting the Raspberry Pi
-- If the web interface is not accessible:
-  - Check if the Raspberry Pi is connected to the network
-  - Verify the IP address shown in the terminal
-  - Make sure no firewall is blocking port 5000
+2. Camera issues:
+   - Ensure the camera is properly connected and enabled in raspi-config
+   - Check for sufficient lighting when using the detector
+
+3. Display issues:
+   - If using over SSH, make sure X11 forwarding is enabled
+   - For direct display, ensure your display is properly connected
+
+4. Recognition accuracy issues:
+   - Use debug mode ('d' key) to see the finger detection status
+   - Adjust your hand position based on the debug information
+   - Try different lighting conditions
+   - Make clear and distinct hand shapes
+
+## Notes
+This application is specifically optimized for Raspberry Pi 4 with 2GB RAM. It uses MediaPipe's hand tracking which is efficient enough to run on this hardware while providing accurate hand gesture recognition. 

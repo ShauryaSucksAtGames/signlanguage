@@ -1,13 +1,6 @@
-numpy==1.17.3
-protobuf==3.20.0
-matplotlib==3.3.4
 opencv-python-headless==3.4.3.18
+matplotlib==3.3.4
+protobuf==3.20.0
 mediapipe-rpi4==0.8.8
 picamera==1.13
-psutil==5.8.0
-flask==2.0.1
-werkzeug==2.0.1
-click==8.0.1
-itsdangerous==2.0.1
-jinja2==3.0.1
-markupsafe==2.0.1 
+psutil==5.8.0 
