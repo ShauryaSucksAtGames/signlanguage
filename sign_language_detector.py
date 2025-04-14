@@ -274,78 +274,24 @@ def detect_letter(hand_landmarks, image=None, debug=False):
             
             letter_scores['N'] = 0.95 if thumb_between_fingers and fingers_position else 0.3
         
-        # O
-        if all(finger == 0 for finger in fingers):  # All fingers marked as closed
-            # Get key points for O detection
-            thumb_tip = posList[4]
-            thumb_base = posList[2]
-            index_tip = posList[8]
-            middle_tip = posList[12]
-            ring_tip = posList[16]
-            pinky_tip = posList[20]
-            
-            # Get base joints for curvature check
-            index_pip = posList[6]
-            middle_pip = posList[10]
-            ring_pip = posList[14]
-            pinky_pip = posList[18]
-            
-            # Check if fingertips form a circle (are close to each other)
-            tips_close = (
-                abs(thumb_tip[1] - index_tip[1]) < 50 and
-                abs(thumb_tip[2] - index_tip[2]) < 50 and
-                abs(index_tip[1] - middle_tip[1]) < 30 and
-                abs(middle_tip[1] - ring_tip[1]) < 30 and
-                abs(ring_tip[1] - pinky_tip[1]) < 30
-            )
-            
-            # Check if fingers are curved (PIP joints should be further out than fingertips)
-            fingers_curved = (
-                index_pip[2] < index_tip[2] and
-                middle_pip[2] < middle_tip[2] and
-                ring_pip[2] < ring_tip[2] and
-                pinky_pip[2] < pinky_tip[2]
-            )
-            
-            # Check if thumb meets middle finger
-            thumb_middle_meeting = (
-                abs(thumb_tip[1] - middle_tip[1]) < 40 and
-                abs(thumb_tip[2] - middle_tip[2]) < 40
-            )
-            
-            # For O, we need all three conditions:
-            # 1. Fingertips form a circle (are close to each other)
-            # 2. Fingers are curved (not flat closed like in E)
-            # 3. Thumb meets middle finger
-            letter_scores['O'] = 0.95 if (tips_close and fingers_curved and thumb_middle_meeting) else 0.3
-            
-            # For E, we need the opposite:
-            # 1. Fingers are more closed (not curved)
-            # 2. Thumb is across the palm
-            # 3. Fingertips are not close together
-            letter_scores['E'] = 0.95 if (not fingers_curved and 
-                                        thumb_tip[1] < index_tip[1] and  # Thumb to the left of index
-                                        thumb_tip[2] > index_tip[2] and  # Thumb below index
-                                        not tips_close) else 0.3
-        
-        # P
-        if fingers[2] == 0:
-            letter_scores['P'] = 0.90 if (posList[4][2] < posList[12][2]) and (posList[4][2] > posList[6][2]) and len(fingers) == 4 and fingers[3] == 0 else 0.3
-        
-        # Q
-        if fingers.count(0) >= 2:
-            letter_scores['Q'] = 0.90 if (fingers[1] == 0) and (fingers[2] == 0) and (fingers[3] == 0) and (posList[8][2] > posList[5][2]) and (posList[4][2] < posList[1][2]) else 0.3
-        
-        # R
-        if fingers.count(1) >= 1:
-            letter_scores['R'] = 0.90 if (posList[8][1] < posList[12][1]) and (fingers.count(1) == 2) and (posList[9][1] > posList[4][1]) else 0.3
-        
         # S
         if fingers.count(0) == 4:
-            # For S: thumb should be wrapped over the fingers, closer to them
-            letter_scores['S'] = 0.95 if (posList[4][1] > posList[12][1] and  # Thumb past middle finger
-                                         posList[4][2] < posList[12][2] and    # Thumb above middle finger
-                                         posList[4][2] > posList[6][2]) else 0.3  # But below index base
+            # Get key points
+            thumb_tip = posList[4]
+            thumb_ip = posList[3]  # Thumb IP joint
+            index_tip = posList[8]
+            middle_tip = posList[12]
+            index_base = posList[6]
+            
+            # For S: thumb should wrap over closed fist
+            thumb_wrapped = (
+                thumb_tip[2] < thumb_ip[2] and      # Thumb tip should be above its IP joint
+                thumb_tip[2] < middle_tip[2] and    # Thumb tip above middle finger
+                thumb_tip[1] > middle_tip[1] and    # Thumb tip should be to the right of middle finger
+                thumb_tip[2] > index_base[2] - 40   # But not too high above index base
+            )
+            
+            letter_scores['S'] = 0.95 if thumb_wrapped else 0.3
         
         # T
         if fingers.count(0) >= 3:
@@ -366,6 +312,48 @@ def detect_letter(hand_landmarks, image=None, debug=False):
         # Y
         if fingers.count(0) >= 2:
             letter_scores['Y'] = 0.95 if fingers.count(0) == 3 and (posList[3][1] < posList[4][1]) and len(fingers) == 4 and fingers[3] == 1 else 0.3
+        
+        # O
+        if fingers.count(0) == 4:
+            # Get key points
+            thumb_tip = posList[4]
+            thumb_ip = posList[3]
+            index_tip = posList[8]
+            middle_tip = posList[12]
+            ring_tip = posList[16]
+            pinky_tip = posList[20]
+            index_pip = posList[6]
+            middle_pip = posList[10]
+            
+            # For O: thumb should meet fingertips to form a circle
+            # Thumb should be at similar height as fingertips (not too high like S, not too low like C)
+            thumb_circle = (
+                abs(thumb_tip[2] - middle_tip[2]) < 30 and      # Thumb tip at similar height as middle finger
+                abs(thumb_tip[1] - middle_tip[1]) < 40 and      # Thumb close to middle finger horizontally
+                thumb_tip[2] > index_pip[2] and                 # Thumb below index PIP (to differentiate from S)
+                thumb_tip[2] < middle_pip[2] + 40               # But not too low (to differentiate from C)
+            )
+            
+            # Check if fingers are forming a circle
+            fingers_circle = (
+                abs(index_tip[1] - middle_tip[1]) < 30 and   # Fingers close together
+                abs(middle_tip[1] - ring_tip[1]) < 30 and
+                abs(ring_tip[1] - pinky_tip[1]) < 30
+            )
+            
+            letter_scores['O'] = 0.95 if (thumb_circle and fingers_circle) else 0.3
+        
+        # P
+        if fingers[2] == 0:
+            letter_scores['P'] = 0.90 if (posList[4][2] < posList[12][2]) and (posList[4][2] > posList[6][2]) and len(fingers) == 4 and fingers[3] == 0 else 0.3
+        
+        # Q
+        if fingers.count(0) >= 2:
+            letter_scores['Q'] = 0.90 if (fingers[1] == 0) and (fingers[2] == 0) and (fingers[3] == 0) and (posList[8][2] > posList[5][2]) and (posList[4][2] < posList[1][2]) else 0.3
+        
+        # R
+        if fingers.count(1) >= 1:
+            letter_scores['R'] = 0.90 if (posList[8][1] < posList[12][1]) and (fingers.count(1) == 2) and (posList[9][1] > posList[4][1]) else 0.3
         
         # Convert scores to list format
         all_matches = [(letter, score) for letter, score in letter_scores.items()]
