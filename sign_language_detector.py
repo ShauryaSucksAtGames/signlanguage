@@ -18,29 +18,21 @@ except:
     pass
 
 # Helper function to draw text with background
-def draw_text_with_background(image, text, position, font_scale=0.56, color=(0, 0, 255), thickness=1):
+def draw_text_with_background(image, text, position, font_scale=0.7, color=(0, 0, 255), thickness=2):
     font = cv2.FONT_HERSHEY_SIMPLEX
+    # Get text size
     text_size = cv2.getTextSize(text, font, font_scale, thickness)[0]
     
-    # Draw background rectangle
-    cv2.rectangle(
-        image, 
-        (position[0] - 5, position[1] - text_size[1] - 5), 
-        (position[0] + text_size[0] + 5, position[1] + 5), 
-        (255, 255, 255), 
-        -1
-    )
+    # Calculate background rectangle
+    padding = 5
+    bg_rect_pt1 = (position[0] - padding, position[1] - text_size[1] - padding)
+    bg_rect_pt2 = (position[0] + text_size[0] + padding, position[1] + padding)
+    
+    # Draw white background rectangle
+    cv2.rectangle(image, bg_rect_pt1, bg_rect_pt2, (255, 255, 255), -1)
     
     # Draw text
-    cv2.putText(
-        image,
-        text,
-        position,
-        font,
-        font_scale,
-        color,
-        thickness
-    )
+    cv2.putText(image, text, position, font, font_scale, color, thickness)
 
 def get_finger_state(hand_landmarks, image=None, debug=False):
     """Determine if each finger is extended or not"""
@@ -193,99 +185,185 @@ def detect_letter(hand_landmarks, image=None, debug=False):
                     color=(0, 255, 0) if state == 1 else (0, 0, 255)
                 )
         
-        # Initialize confidence scores for all letters (excluding N, O, and S)
+        # Store ALL matches and their confidence levels
+        all_matches = []
+        
+        # Initialize confidence scores for all letters
         letter_scores = {
             'A': 0.0, 'B': 0.0, 'C': 0.0, 'D': 0.0, 'E': 0.0,
             'F': 0.0, 'G': 0.0, 'H': 0.0, 'I': 0.0, 'K': 0.0,
-            'L': 0.0, 'M': 0.0, 'P': 0.0, 'R': 0.0, 'T': 0.0,
-            'U': 0.0, 'V': 0.0, 'W': 0.0, 'Y': 0.0
+            'L': 0.0, 'M': 0.0, 'N': 0.0, 'O': 0.0, 'P': 0.0,
+            'Q': 0.0, 'R': 0.0, 'S': 0.0, 'T': 0.0, 'U': 0.0,
+            'V': 0.0, 'W': 0.0, 'Y': 0.0
         }
         
-        # A - Thumb out to side
+        # Calculate base confidence for each letter
+        # A
         if fingers.count(0) == 4:
+            # For A: thumb should be sticking out to the side and up
             letter_scores['A'] = 0.95 if (posList[4][2] < posList[6][2] and  # Thumb tip above index base
                                          posList[4][1] > posList[6][1]) else 0.3  # Thumb to the right of index base
         
-        # B - All fingers extended
+        # B
         if fingers.count(1) >= 3:
             letter_scores['B'] = 0.95 if (posList[3][1] > posList[4][1]) and fingers.count(1) == 4 else 0.4
         
-        # C - Curved hand
+        # C
         if fingers.count(0.5) >= 1:
             letter_scores['C'] = 0.90 if (posList[3][1] > posList[6][1]) and (posList[4][2] > posList[8][2]) else 0.3
         
-        # D - Index up, others down
+        # D
         if fingers[0] == 1:
             letter_scores['D'] = 0.95 if fingers.count(0) == 3 and (posList[3][1] > posList[4][1]) else 0.3
         
-        # E - All fingers curled
+        # E
         if fingers.count(0) == 4:
             letter_scores['E'] = 0.95 if (posList[3][1] < posList[6][1]) and posList[12][2] < posList[4][2] else 0.3
         
-        # F - Index and thumb touching
+        # F
         if fingers.count(1) >= 2:
             letter_scores['F'] = 0.90 if (fingers.count(1) == 3) and (fingers[0] == 0) and (posList[3][2] > posList[4][2]) else 0.3
         
-        # G - Index pointing at thumb
+        # G
         if fingers[0] == 0.25:
             letter_scores['G'] = 0.90 if fingers.count(0) == 3 else 0.3
         
-        # H - Index and middle parallel
+        # H
         if fingers[0] == 0.25 or fingers[1] == 0.25:
             letter_scores['H'] = 0.90 if fingers[0] == 0.25 and fingers[1] == 0.25 and fingers.count(0) == 2 else 0.3
         
-        # I - Pinky up
+        # I
         if fingers.count(0) >= 2:
             letter_scores['I'] = 0.95 if (posList[4][1] < posList[6][1]) and fingers.count(0) == 3 and len(fingers) == 4 and fingers[3] == 1 else 0.3
         
-        # K - Index and middle up, spread
+        # K
         if fingers.count(1) >= 1:
             letter_scores['K'] = 0.90 if (posList[4][1] < posList[6][1] and posList[4][1] > posList[10][1] and fingers.count(1) == 2) else 0.3
         
-        # L - L shape with thumb and index
+        # L
         if fingers[0] == 1:
             letter_scores['L'] = 0.95 if fingers.count(0) == 3 and (posList[3][1] < posList[4][1]) else 0.3
         
-        # M - Improved detection
-        if fingers.count(0) == 4:
-            # Thumb between ring and pinky
+        # M
+        if fingers.count(0) >= 3:
+            letter_scores['M'] = 0.95 if (posList[4][1] < posList[16][1]) and fingers.count(0) == 4 else 0.3
+        
+        # N
+        if fingers.count(0) >= 3:
+            # For N: thumb should be between index and middle finger
+            # Get positions for specific checks
             thumb_tip = posList[4]
-            ring_base = posList[14]
-            pinky_base = posList[18]
+            index_tip = posList[8]
+            middle_tip = posList[12]
+            index_pip = posList[6]
+            middle_pip = posList[10]
             
-            thumb_between_ring_pinky = (
-                thumb_tip[1] > ring_base[1] and
-                thumb_tip[1] < pinky_base[1] and
-                thumb_tip[2] > ring_base[2]
+            # Check if thumb is positioned between index and middle finger
+            thumb_between_fingers = (
+                thumb_tip[1] > index_tip[1] and 
+                thumb_tip[1] < middle_tip[1] and
+                thumb_tip[2] > index_pip[2] and
+                thumb_tip[2] < middle_pip[2]
             )
             
-            letter_scores['M'] = 0.95 if thumb_between_ring_pinky else 0.3
+            # Check if fingers are properly positioned
+            fingers_position = (
+                fingers.count(0) == 4 and  # All fingers should be closed
+                abs(index_tip[1] - middle_tip[1]) > 20  # Index and middle should have some separation
+            )
+            
+            letter_scores['N'] = 0.95 if thumb_between_fingers and fingers_position else 0.3
         
-        # P - Thumb between middle and ring fingers
+        # O
+        if all(finger == 0 for finger in fingers):  # All fingers marked as closed
+            # Get key points for O detection
+            thumb_tip = posList[4]
+            thumb_base = posList[2]
+            index_tip = posList[8]
+            middle_tip = posList[12]
+            ring_tip = posList[16]
+            pinky_tip = posList[20]
+            
+            # Get base joints for curvature check
+            index_pip = posList[6]
+            middle_pip = posList[10]
+            ring_pip = posList[14]
+            pinky_pip = posList[18]
+            
+            # Check if fingertips form a circle (are close to each other)
+            tips_close = (
+                abs(thumb_tip[1] - index_tip[1]) < 50 and
+                abs(thumb_tip[2] - index_tip[2]) < 50 and
+                abs(index_tip[1] - middle_tip[1]) < 30 and
+                abs(middle_tip[1] - ring_tip[1]) < 30 and
+                abs(ring_tip[1] - pinky_tip[1]) < 30
+            )
+            
+            # Check if fingers are curved (PIP joints should be further out than fingertips)
+            fingers_curved = (
+                index_pip[2] < index_tip[2] and
+                middle_pip[2] < middle_tip[2] and
+                ring_pip[2] < ring_tip[2] and
+                pinky_pip[2] < pinky_tip[2]
+            )
+            
+            # Check if thumb meets middle finger
+            thumb_middle_meeting = (
+                abs(thumb_tip[1] - middle_tip[1]) < 40 and
+                abs(thumb_tip[2] - middle_tip[2]) < 40
+            )
+            
+            # For O, we need all three conditions:
+            # 1. Fingertips form a circle (are close to each other)
+            # 2. Fingers are curved (not flat closed like in E)
+            # 3. Thumb meets middle finger
+            letter_scores['O'] = 0.95 if (tips_close and fingers_curved and thumb_middle_meeting) else 0.3
+            
+            # For E, we need the opposite:
+            # 1. Fingers are more closed (not curved)
+            # 2. Thumb is across the palm
+            # 3. Fingertips are not close together
+            letter_scores['E'] = 0.95 if (not fingers_curved and 
+                                        thumb_tip[1] < index_tip[1] and  # Thumb to the left of index
+                                        thumb_tip[2] > index_tip[2] and  # Thumb below index
+                                        not tips_close) else 0.3
+        
+        # P
         if fingers[2] == 0:
             letter_scores['P'] = 0.90 if (posList[4][2] < posList[12][2]) and (posList[4][2] > posList[6][2]) and len(fingers) == 4 and fingers[3] == 0 else 0.3
         
-        # R - Cross fingers
+        # Q
+        if fingers.count(0) >= 2:
+            letter_scores['Q'] = 0.90 if (fingers[1] == 0) and (fingers[2] == 0) and (fingers[3] == 0) and (posList[8][2] > posList[5][2]) and (posList[4][2] < posList[1][2]) else 0.3
+        
+        # R
         if fingers.count(1) >= 1:
             letter_scores['R'] = 0.90 if (posList[8][1] < posList[12][1]) and (fingers.count(1) == 2) and (posList[9][1] > posList[4][1]) else 0.3
         
-        # T - Thumb between index and middle
+        # S
+        if fingers.count(0) == 4:
+            # For S: thumb should be wrapped over the fingers, closer to them
+            letter_scores['S'] = 0.95 if (posList[4][1] > posList[12][1] and  # Thumb past middle finger
+                                         posList[4][2] < posList[12][2] and    # Thumb above middle finger
+                                         posList[4][2] > posList[6][2]) else 0.3  # But below index base
+        
+        # T
         if fingers.count(0) >= 3:
             letter_scores['T'] = 0.95 if (posList[4][1] > posList[12][1]) and posList[4][2] < posList[6][2] and fingers.count(0) == 4 else 0.3
         
-        # U - Index and middle parallel
+        # U
         if fingers.count(1) >= 1:
             letter_scores['U'] = 0.90 if (posList[4][1] < posList[6][1] and posList[4][1] < posList[10][1] and fingers.count(1) == 2 and posList[3][2] > posList[4][2] and (posList[8][1] - posList[11][1]) <= 50) else 0.3
         
-        # V - Index and middle spread
+        # V
         if fingers.count(1) >= 1:
-            letter_scores['V'] = 0.90 if (posList[4][1] < posList[6][1] and posList[4][1] < posList[10][1] and fingers.count(1) == 2 and posList[3][2] > posList[4][2] and (posList[8][1] - posList[12][1]) > 50) else 0.3
+            letter_scores['V'] = 0.90 if (posList[4][1] < posList[6][1] and posList[4][1] < posList[10][1] and fingers.count(1) == 2 and posList[3][2] > posList[4][2]) else 0.3
         
-        # W - Three fingers up
+        # W
         if fingers.count(1) >= 2:
             letter_scores['W'] = 0.90 if (posList[4][1] < posList[6][1] and posList[4][1] < posList[10][1] and fingers.count(1) == 3) else 0.3
         
-        # Y - Thumb and pinky out
+        # Y
         if fingers.count(0) >= 2:
             letter_scores['Y'] = 0.95 if fingers.count(0) == 3 and (posList[3][1] < posList[4][1]) and len(fingers) == 4 and fingers[3] == 1 else 0.3
         
@@ -390,65 +468,39 @@ def main():
                     # Detect letter with all matches
                     detected_letter, confidence_level, all_matches = detect_letter(hand_landmarks, image if debug_mode else None, debug_mode)
                     
-                    # Display all matches if in debug mode
-                    if debug_mode and all_matches:
-                        # Calculate total height needed
-                        total_height = len(all_matches) * 25 + 20  # Add padding
-                        
-                        # Draw a semi-transparent background for the confidence list
-                        overlay = image.copy()
-                        cv2.rectangle(
-                            overlay,
-                            (image.shape[1] - 200, 60),  # Move to right side
-                            (image.shape[1] - 10, 60 + total_height),
-                            (255, 255, 255),
-                            -1
-                        )
-                        image = cv2.addWeighted(overlay, 0.8, image, 0.2, 0)
-                        
-                        # Display each match with confidence percentage
-                        for i, (letter, conf) in enumerate(all_matches):
-                            # Convert confidence to percentage
-                            percentage = conf * 100
-                            
-                            # Use different colors based on confidence level
-                            if conf >= 0.95:
-                                color = (0, 255, 0)  # Green for high confidence
-                            elif conf >= 0.90:
-                                color = (0, 165, 255)  # Orange for medium confidence
-                            elif conf >= 0.5:
-                                color = (0, 0, 255)  # Red for low confidence
-                            else:
-                                color = (128, 128, 128)  # Gray for very low confidence
-                            
-                            # Draw confidence bar
-                            bar_start = (image.shape[1] - 180, 77 + i * 25)
-                            bar_end = (int(bar_start[0] + 150 * (conf)), bar_start[1])
-                            cv2.rectangle(
-                                image,
-                                bar_start,
-                                (image.shape[1] - 30, bar_start[1] + 15),
-                                (200, 200, 200),
-                                1
-                            )
-                            if conf > 0:
-                                cv2.rectangle(
-                                    image,
-                                    bar_start,
-                                    bar_end,
-                                    color,
-                                    -1
-                                )
-                            
-                            # Draw letter and percentage
+                    # Display all letter confidences
+                    y_offset = 0
+                    for l, score in sorted([('A', confidence_level if detected_letter == 'A' else 0.3),
+                                         ('B', confidence_level if detected_letter == 'B' else 0.3),
+                                         ('C', confidence_level if detected_letter == 'C' else 0.3),
+                                         ('D', confidence_level if detected_letter == 'D' else 0.3),
+                                         ('E', confidence_level if detected_letter == 'E' else 0.3),
+                                         ('F', confidence_level if detected_letter == 'F' else 0.3),
+                                         ('G', confidence_level if detected_letter == 'G' else 0.3),
+                                         ('H', confidence_level if detected_letter == 'H' else 0.3),
+                                         ('I', confidence_level if detected_letter == 'I' else 0.3),
+                                         ('K', confidence_level if detected_letter == 'K' else 0.3),
+                                         ('L', confidence_level if detected_letter == 'L' else 0.3),
+                                         ('M', confidence_level if detected_letter == 'M' else 0.3),
+                                         ('N', confidence_level if detected_letter == 'N' else 0.3),
+                                         ('O', confidence_level if detected_letter == 'O' else 0.3),
+                                         ('R', confidence_level if detected_letter == 'R' else 0.3),
+                                         ('S', confidence_level if detected_letter == 'S' else 0.3),
+                                         ('T', confidence_level if detected_letter == 'T' else 0.3),
+                                         ('U', confidence_level if detected_letter == 'U' else 0.3),
+                                         ('V', confidence_level if detected_letter == 'V' else 0.3),
+                                         ('W', confidence_level if detected_letter == 'W' else 0.3),
+                                         ('Y', confidence_level if detected_letter == 'Y' else 0.3)],
+                                        key=lambda x: x[1], reverse=True):
+                        if score > 0.3:  # Only show letters with confidence above 0.3
+                            color = (0, 255, 0) if score >= 0.95 else (255, 165, 0) if score >= 0.9 else (128, 128, 128)
                             draw_text_with_background(
-                                image, 
-                                f"{letter}: {percentage:.1f}%",
-                                (image.shape[1] - 190, 75 + i * 25),
-                                font_scale=0.5,
-                                color=color,
-                                thickness=1
+                                image,
+                                f"{l}: {score*100:.1f}%",
+                                (image.shape[1] - 150, 50 + y_offset),
+                                color=color
                             )
+                            y_offset += 30
             
             else:
                 # No hand detected
@@ -479,10 +531,10 @@ def main():
             elif key == ord('d'):
                 debug_mode = not debug_mode
                 print(f"Debug mode: {'ON' if debug_mode else 'OFF'}")
-    
+
     except Exception as e:
         print(f"Error: {str(e)}")
-    
+
     finally:
         # Cleanup
         camera.close()
