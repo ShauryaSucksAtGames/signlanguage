@@ -192,8 +192,7 @@ def detect_letter(hand_landmarks, image=None, debug=False):
         letter_scores = {
             'A': 0.0, 'B': 0.0, 'C': 0.0, 'D': 0.0, 'E': 0.0,
             'F': 0.0, 'G': 0.0, 'H': 0.0, 'I': 0.0, 'K': 0.0,
-            'L': 0.0, 'M': 0.0, 'N': 0.0, 'O': 0.0, 'P': 0.0,
-            'Q': 0.0, 'R': 0.0, 'S': 0.0, 'T': 0.0, 'U': 0.0,
+            'L': 0.0, 'M': 0.0, 'R': 0.0, 'S': 0.0, 'U': 0.0,
             'V': 0.0, 'W': 0.0, 'Y': 0.0
         }
         
@@ -248,31 +247,9 @@ def detect_letter(hand_landmarks, image=None, debug=False):
         if fingers.count(0) >= 3:
             letter_scores['M'] = 0.95 if (posList[4][1] < posList[16][1]) and fingers.count(0) == 4 else 0.3
         
-        # N
-        if fingers.count(0) >= 3:
-            # For N: thumb should be between index and middle finger
-            # Get positions for specific checks
-            thumb_tip = posList[4]
-            index_tip = posList[8]
-            middle_tip = posList[12]
-            index_pip = posList[6]
-            middle_pip = posList[10]
-            
-            # Check if thumb is positioned between index and middle finger
-            thumb_between_fingers = (
-                thumb_tip[1] > index_tip[1] and 
-                thumb_tip[1] < middle_tip[1] and
-                thumb_tip[2] > index_pip[2] and
-                thumb_tip[2] < middle_pip[2]
-            )
-            
-            # Check if fingers are properly positioned
-            fingers_position = (
-                fingers.count(0) == 4 and  # All fingers should be closed
-                abs(index_tip[1] - middle_tip[1]) > 20  # Index and middle should have some separation
-            )
-            
-            letter_scores['N'] = 0.95 if thumb_between_fingers and fingers_position else 0.3
+        # R
+        if fingers.count(1) >= 1:
+            letter_scores['R'] = 0.90 if (posList[8][1] < posList[12][1]) and (fingers.count(1) == 2) and (posList[9][1] > posList[4][1]) else 0.3
         
         # S
         if fingers.count(0) == 4:
@@ -293,10 +270,6 @@ def detect_letter(hand_landmarks, image=None, debug=False):
             
             letter_scores['S'] = 0.95 if thumb_wrapped else 0.3
         
-        # T
-        if fingers.count(0) >= 3:
-            letter_scores['T'] = 0.95 if (posList[4][1] > posList[12][1]) and posList[4][2] < posList[6][2] and fingers.count(0) == 4 else 0.3
-        
         # U
         if fingers.count(1) >= 1:
             letter_scores['U'] = 0.90 if (posList[4][1] < posList[6][1] and posList[4][1] < posList[10][1] and fingers.count(1) == 2 and posList[3][2] > posList[4][2] and (posList[8][1] - posList[11][1]) <= 50) else 0.3
@@ -312,48 +285,6 @@ def detect_letter(hand_landmarks, image=None, debug=False):
         # Y
         if fingers.count(0) >= 2:
             letter_scores['Y'] = 0.95 if fingers.count(0) == 3 and (posList[3][1] < posList[4][1]) and len(fingers) == 4 and fingers[3] == 1 else 0.3
-        
-        # O
-        if fingers.count(0) == 4:
-            # Get key points
-            thumb_tip = posList[4]
-            thumb_ip = posList[3]
-            index_tip = posList[8]
-            middle_tip = posList[12]
-            ring_tip = posList[16]
-            pinky_tip = posList[20]
-            index_pip = posList[6]
-            middle_pip = posList[10]
-            
-            # For O: thumb should meet fingertips to form a circle
-            # Thumb should be at similar height as fingertips (not too high like S, not too low like C)
-            thumb_circle = (
-                abs(thumb_tip[2] - middle_tip[2]) < 30 and      # Thumb tip at similar height as middle finger
-                abs(thumb_tip[1] - middle_tip[1]) < 40 and      # Thumb close to middle finger horizontally
-                thumb_tip[2] > index_pip[2] and                 # Thumb below index PIP (to differentiate from S)
-                thumb_tip[2] < middle_pip[2] + 40               # But not too low (to differentiate from C)
-            )
-            
-            # Check if fingers are forming a circle
-            fingers_circle = (
-                abs(index_tip[1] - middle_tip[1]) < 30 and   # Fingers close together
-                abs(middle_tip[1] - ring_tip[1]) < 30 and
-                abs(ring_tip[1] - pinky_tip[1]) < 30
-            )
-            
-            letter_scores['O'] = 0.95 if (thumb_circle and fingers_circle) else 0.3
-        
-        # P
-        if fingers[2] == 0:
-            letter_scores['P'] = 0.90 if (posList[4][2] < posList[12][2]) and (posList[4][2] > posList[6][2]) and len(fingers) == 4 and fingers[3] == 0 else 0.3
-        
-        # Q
-        if fingers.count(0) >= 2:
-            letter_scores['Q'] = 0.90 if (fingers[1] == 0) and (fingers[2] == 0) and (fingers[3] == 0) and (posList[8][2] > posList[5][2]) and (posList[4][2] < posList[1][2]) else 0.3
-        
-        # R
-        if fingers.count(1) >= 1:
-            letter_scores['R'] = 0.90 if (posList[8][1] < posList[12][1]) and (fingers.count(1) == 2) and (posList[9][1] > posList[4][1]) else 0.3
         
         # Convert scores to list format
         all_matches = [(letter, score) for letter, score in letter_scores.items()]
@@ -470,11 +401,8 @@ def main():
                                          ('K', confidence_level if detected_letter == 'K' else 0.3),
                                          ('L', confidence_level if detected_letter == 'L' else 0.3),
                                          ('M', confidence_level if detected_letter == 'M' else 0.3),
-                                         ('N', confidence_level if detected_letter == 'N' else 0.3),
-                                         ('O', confidence_level if detected_letter == 'O' else 0.3),
                                          ('R', confidence_level if detected_letter == 'R' else 0.3),
                                          ('S', confidence_level if detected_letter == 'S' else 0.3),
-                                         ('T', confidence_level if detected_letter == 'T' else 0.3),
                                          ('U', confidence_level if detected_letter == 'U' else 0.3),
                                          ('V', confidence_level if detected_letter == 'V' else 0.3),
                                          ('W', confidence_level if detected_letter == 'W' else 0.3),

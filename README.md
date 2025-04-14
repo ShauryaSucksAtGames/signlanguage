@@ -59,7 +59,7 @@ To start the sign language detector:
 
 ```bash
 # Activate the virtual environment
-source sign_env/bin/activate
+source venv/bin/activate
 
 # Run the detector
 python3 sign_language_detector.py
